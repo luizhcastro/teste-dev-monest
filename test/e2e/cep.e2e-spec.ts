@@ -133,6 +133,19 @@ describe('CEP API (e2e)', () => {
     expect(res.headers['retry-after']).toBe('30');
   });
 
+  it('GET /health/live → 200 { status: ok }', async () => {
+    const res = await request(app.getHttpServer()).get('/health/live');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'ok' });
+  });
+
+  it('GET /health/ready → 200 ready (sem breakers ainda)', async () => {
+    const res = await request(app.getHttpServer()).get('/health/ready');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ready');
+    expect(Array.isArray(res.body.circuits)).toBe(true);
+  });
+
   it('propaga X-Correlation-Id do request para a resposta', async () => {
     mockFetchImpl(async () =>
       jsonResponse(200, {
