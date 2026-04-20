@@ -80,45 +80,85 @@ curl -s http://localhost:3000/cep/01310100 | jq
 
 ## Docker
 
-`Dockerfile` (multi-stage):
+`Dockerfile` — multi-stage com 3 estágios (deps / build / runtime) + `tini`:
+
 ```dockerfile
+# syntax=docker/dockerfile:1.7
+
+# -------- deps (só produção) --------
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# -------- build (devDeps + compila TS) --------
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package*.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig*.json ./
+COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
 RUN npm run build
 
-FROM node:20-alpine
+# -------- runtime --------
+FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+
+# tini: reaper de zumbis + forwarding correto de SIGTERM
+#       (garante que o handler do OTel rode antes do processo morrer)
+RUN apk add --no-cache tini wget
+
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY package.json ./
+
 USER node
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/health/live || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "dist/main.js"]
 ```
+
+**Por que 3 estágios:**
+- `deps` — node_modules **sem** devDependencies (lean, copiado para runtime)
+- `build` — node_modules completo pra compilar TypeScript (descartado depois)
+- `runtime` — apenas `dist/` + `node_modules` de produção + binários mínimos
+
+Resultado: imagem final sem `typescript`, `nest-cli`, `jest`, etc.
+
+**Por que `tini`:** Node como PID 1 em container não faz reap de zumbis nem propaga SIGTERM corretamente. `tini` resolve ambos e garante que o `shutdown()` do OTel SDK rode antes do exit.
 
 `docker-compose.yml`:
 ```yaml
 services:
   api:
-    build: .
-    ports:
-      - "3000:3000"
-    env_file: .env
+    build: { context: ., dockerfile: Dockerfile }
+    image: cep-api:local
+    container_name: cep-api
+    ports: ["3000:3000"]
+    env_file: [.env]
+    environment:
+      NODE_ENV: production
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health/live"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health/live"]
       interval: 30s
       timeout: 3s
       retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }
 ```
 
 ```bash
 docker compose up --build
+# ou
+make docker
 ```
 
 ## Scripts (package.json)
@@ -126,10 +166,12 @@ docker compose up --build
 ```json
 {
   "scripts": {
+    "prebuild": "rimraf dist",
+    "build": "nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "build": "nest build",
+    "start:prod": "node dist/main",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
@@ -159,55 +201,48 @@ Retorna 200 se **pelo menos um circuito** está CLOSED ou HALF_OPEN. Se ambos OP
 
 ```ts
 @Get('ready')
-ready() {
-  const breakers = this.breakerFactory.all();
-  const anyUp = breakers.some(b => !b.opened);
+ready(): ReadyResponse {
+  const circuits = this.breakerFactory.all().map(({ name, breaker }) => ({
+    provider: name,
+    state: this.stateOf(breaker.opened, breaker.halfOpen),
+  }));
+  const anyUp = circuits.length === 0 || circuits.some((c) => c.state !== 'open');
   if (!anyUp) {
-    throw new ServiceUnavailableException({
-      status: 'not_ready',
-      circuits: breakers.map(b => ({
-        provider: b.name,
-        state: b.opened ? 'open' : 'closed',
-      })),
-    });
+    throw new ServiceUnavailableException({ status: 'not_ready', circuits });
   }
-  return { status: 'ready', circuits: /* ... */ };
+  return { status: 'ready', circuits };
 }
 ```
+
+Se **ainda não houve nenhuma chamada** (factory vazia), readiness retorna `ready` — não temos motivo pra marcar não-pronto antes do primeiro request.
 
 Em k8s: liveness separado de readiness permite que o pod **não receba tráfego** quando está degradado, sem ser reiniciado.
 
 ## Makefile (conveniência)
 
 ```makefile
-.PHONY: install dev build test lint docker clean
+.PHONY: install dev build start test test-watch test-cov test-e2e test-all \
+        lint format docker docker-build docker-up docker-down clean
 
-install:
-	npm install
-
-dev:
-	npm run start:dev
-
-build:
-	npm run build
-
-test:
-	npm test
-
-test-e2e:
-	npm run test:e2e
-
-lint:
-	npm run lint
-
-docker:
-	docker compose up --build
-
-clean:
-	rm -rf dist node_modules coverage
+install:      ; npm install
+dev:          ; npm run start:dev
+build:        ; npm run build
+start: build  ; npm run start:prod
+test:         ; npm test
+test-watch:   ; npm run test:watch
+test-cov:     ; npm run test:cov
+test-e2e:     ; npm run test:e2e
+test-all: test test-e2e
+lint:         ; npm run lint
+format:       ; npm run format
+docker-build: ; docker compose build
+docker-up:    ; docker compose up -d
+docker-down:  ; docker compose down
+docker:       ; docker compose up --build
+clean:        ; rm -rf dist node_modules coverage
 ```
 
-`make dev` ou `make docker` pra rodar.
+`make dev` pra desenvolvimento com hot reload, `make docker` pra subir em container, `make test-all` pra rodar unit + integration + e2e.
 
 ## Teste manual rápido
 

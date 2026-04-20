@@ -23,26 +23,36 @@ Para o desafio, **LRU vence por simplicidade**.
 // src/cep/cache/cep-cache.service.ts
 import { LRUCache } from 'lru-cache';
 
+export interface CachedCepData extends CepData {
+  provider: string;
+}
+
+export interface CacheLookup {
+  data: CachedCepData;
+  stale: boolean;
+}
+
 @Injectable()
 export class CepCacheService {
   private readonly cache: LRUCache<string, CachedCepData>;
 
-  constructor(config: ConfigService) {
-    this.cache = new LRUCache({
+  constructor(config: ConfigService<Env, true>) {
+    this.cache = new LRUCache<string, CachedCepData>({
       max: config.get('CACHE_MAX_ENTRIES'),        // 10_000
       ttl: config.get('CACHE_TTL_MS'),             // 86_400_000 (24h)
+      ttlAutopurge: false,                          // não agendar timers — purge lazy no get
       allowStale: true,
       updateAgeOnGet: false,
-      ttlResolution: 60_000,                       // verifica TTL a cada 1min
+      ttlResolution: 60_000,                        // checa TTL no máx a cada 1min
     });
   }
 
-  get(cep: string): { data: CachedCepData; stale: boolean } | undefined {
+  get(cep: string): CacheLookup | undefined {
     const fresh = this.cache.get(cep);
-    if (fresh) return { data: fresh, stale: false };
+    if (fresh !== undefined) return { data: fresh, stale: false };
 
     const stale = this.cache.get(cep, { allowStale: true });
-    if (stale) return { data: stale, stale: true };
+    if (stale !== undefined) return { data: stale, stale: true };
 
     return undefined;
   }
@@ -51,13 +61,8 @@ export class CepCacheService {
     this.cache.set(cep, data);
   }
 
-  size(): number {
-    return this.cache.size;
-  }
-}
-
-interface CachedCepData extends CepData {
-  provider: string;
+  clear(): void { this.cache.clear(); }
+  size(): number { return this.cache.size; }
 }
 ```
 
@@ -88,16 +93,29 @@ Queremos TTL desde quando o dado foi **buscado**, não desde o último acesso. S
 ### `ttlResolution`
 Evita checar TTL em cada `.get()`. 1 minuto de granularidade é ok — pior caso, serve dado 1min expirado (aceitável).
 
+### `ttlAutopurge: false`
+Com `true`, a lib agenda `setTimeout` pra cada entry expirar — ruim pra 10k CEPs (10k timers pendentes no event loop). Com `false`, a expiração é **lazy**: checada quando o key é acessado ou quando o TTL resolver roda. Combina com `allowStale: true` pra permitir o fallback.
+
 ## Chave
 
 CEP normalizado: **só dígitos, 8 chars**. Ex: `01310100`.
 
-Normalização acontece no DTO **antes** de chegar no service:
+Normalização acontece no **pipe** (`CepParamPipe`) **antes** de chegar no service:
 ```ts
-export class CepParamDto {
-  @Transform(({ value }) => value.replace(/\D/g, ''))
-  @Matches(/^\d{8}$/)
-  cep: string;
+// src/cep/dto/cep-param.dto.ts
+export function normalizeCep(raw: string): string {
+  return raw.replace(/\D/g, '');
+}
+
+@Injectable()
+export class CepParamPipe implements PipeTransform<string, string> {
+  transform(value: string): string {
+    const normalized = normalizeCep(value ?? '');
+    if (!/^\d{8}$/.test(normalized)) {
+      throw new BadRequestException('CEP inválido: deve ter 8 dígitos');
+    }
+    return normalized;
+  }
 }
 ```
 
@@ -113,8 +131,7 @@ Input `01310-100`, `01310100`, `01 310 100` → todos viram `01310100` → cache
 ### Métricas
 - `cep_cache_hits_total` (counter)
 - `cep_cache_misses_total` (counter)
-- `cep_cache_size` (gauge, observado em scrape)
-- `cep_cache_stale_hits_total` (counter) — separado por importância diagnóstica
+- `cep_cache_stale_hits_total` (counter) — separado por importância diagnóstica (cada incremento = request que só sobreviveu por causa do stale)
 
 ### Logs
 - INFO em cache hit com `{ cep, cached: true, stale: false|true }`
@@ -134,10 +151,10 @@ Fica como "possível melhoria" documentada.
 
 ## Reset em testes
 
+`CepCacheService` expõe `clear()` público:
+
 ```ts
-it('resetta entre testes', () => {
-  cache['cache'].clear();
+afterEach(() => {
+  cache.clear();
 });
 ```
-
-Ou expor `clear()` público e chamar em `afterEach`.

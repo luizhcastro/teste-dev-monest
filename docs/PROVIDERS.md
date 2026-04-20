@@ -42,10 +42,28 @@ export interface CepData {
 
 ```ts
 async fetch(cep: string, signal: AbortSignal): Promise<CepData> {
-  const response = await axios.get(`${this.baseUrl}/ws/${cep}/json/`, { signal });
-  const parsed = viaCepSchema.safeParse(response.data);
+  const url = `${this.baseUrl}/ws/${cep}/json/`;
+
+  let response: Response;
+  try {
+    response = await globalThis.fetch(url, { signal });
+  } catch (err) {
+    throw mapFetchError(this.name, err); // AbortError → Timeout, resto → Network
+  }
+
+  if (!response.ok) throw new ProviderHttpError(this.name, response.status);
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (err) {
+    throw new ProviderContractError(this.name, err);
+  }
+
+  const parsed = viaCepSchema.safeParse(body);
   if (!parsed.success) throw new ProviderContractError(this.name, parsed.error);
   if ('erro' in parsed.data) throw new CepNotFoundError(cep);
+
   return {
     cep,
     street: parsed.data.logradouro,
@@ -64,17 +82,41 @@ async fetch(cep: string, signal: AbortSignal): Promise<CepData> {
 
 ```ts
 async fetch(cep: string, signal: AbortSignal): Promise<CepData> {
+  const url = `${this.baseUrl}/api/cep/v1/${cep}`;
+
+  let response: Response;
   try {
-    const response = await axios.get(`${this.baseUrl}/api/cep/v1/${cep}`, { signal });
-    const parsed = brasilApiSchema.safeParse(response.data);
-    if (!parsed.success) throw new ProviderContractError(this.name, parsed.error);
-    return { cep, ...parsed.data };
+    response = await globalThis.fetch(url, { signal });
   } catch (err) {
-    if (axios.isAxiosError(err) && err.response?.status === 404) {
-      throw new CepNotFoundError(cep);
-    }
-    throw this.mapAxiosError(err);
+    throw mapFetchError(this.name, err);
   }
+
+  if (response.status === 404) throw new CepNotFoundError(cep);
+  if (!response.ok) throw new ProviderHttpError(this.name, response.status);
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (err) {
+    throw new ProviderContractError(this.name, err);
+  }
+
+  const parsed = brasilApiSchema.safeParse(body);
+  if (!parsed.success) throw new ProviderContractError(this.name, parsed.error);
+
+  return { cep, ...parsed.data };
+}
+```
+
+### `fetch-error.mapper.ts`
+Centraliza a conversão de erros do `fetch` em `ProviderError`:
+
+```ts
+export function mapFetchError(provider: string, err: unknown): ProviderError {
+  if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+    return new ProviderTimeoutError(provider, err);
+  }
+  return new ProviderNetworkError(provider, err);
 }
 ```
 
@@ -134,15 +176,24 @@ export const brasilApiSchema = z.object({
 
 ## Como adicionar um novo provider (ex: Postmon)
 
-1. Criar `src/cep/providers/postmon.provider.ts` implementando `CepProvider`
+1. Criar `src/cep/providers/postmon.provider.ts` implementando `CepProvider` (usando `globalThis.fetch` + `mapFetchError`)
 2. Criar `src/cep/schemas/postmon.schema.ts` com Zod
-3. Registrar no `CepModule`:
+3. Registrar no `CepModule` — adicionar como classe e incluir na factory do `CEP_PROVIDERS`:
    ```ts
-   { provide: CEP_PROVIDERS, useClass: PostmonProvider, multi: true }
+   providers: [
+     ViaCepProvider,
+     BrasilApiProvider,
+     PostmonProvider,
+     {
+       provide: CEP_PROVIDERS,
+       useFactory: (via, br, postmon) => [via, br, postmon],
+       inject: [ViaCepProvider, BrasilApiProvider, PostmonProvider],
+     },
+   ]
    ```
 4. O `CircuitBreakerFactory` detecta automaticamente (cria breaker no primeiro uso)
-5. Adicionar env var `POSTMON_URL` (se quiser configurável)
+5. Adicionar env var `POSTMON_URL` no Zod env schema (se quiser configurável)
 
 **Zero mudança em:** controller, service, selector, exception filter, cache.
 
-**Testes necessários:** unit do parsing, integration com nock, adicionar cenário no teste de round-robin com 3+ providers.
+**Testes necessários:** integration do novo provider (com `jest.spyOn(globalThis, 'fetch')`), adicionar cenário no teste de round-robin com 3+ providers (já existe no `provider-selector.service.spec.ts`).

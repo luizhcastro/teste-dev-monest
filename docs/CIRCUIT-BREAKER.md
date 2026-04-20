@@ -66,22 +66,34 @@ Se ViaCEP está fora mas BrasilAPI está bem, breaker global derrubaria ambos. P
 
 ```ts
 @Injectable()
-export class CircuitBreakerFactory implements OnModuleDestroy {
-  private readonly breakers = new Map<string, CircuitBreaker>();
+export class CircuitBreakerFactory implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(CircuitBreakerFactory.name);
+  private readonly breakers = new Map<string, CepBreaker>();
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService<Env, true>) {}
 
-  get(provider: CepProvider): CircuitBreaker {
+  onModuleInit(): void {
+    // ObservableGauge: OTel invoca o callback no intervalo de export (10s).
+    // Lemos o estado REAL do breaker a cada scrape — sem risco de drift.
+    circuitStateGauge.addCallback((result) => {
+      for (const { name, breaker } of this.all()) {
+        const state = breaker.opened ? 2 : breaker.halfOpen ? 1 : 0;
+        result.observe(state, { provider: name });
+      }
+    });
+  }
+
+  get(provider: CepProvider): CepBreaker {
     const existing = this.breakers.get(provider.name);
     if (existing) return existing;
 
     const breaker = new CircuitBreaker(
       (cep: string, signal: AbortSignal) => provider.fetch(cep, signal),
       {
-        timeout: this.config.get('PROVIDER_TIMEOUT_MS'),
-        errorThresholdPercentage: this.config.get('CIRCUIT_ERROR_THRESHOLD_PERCENTAGE'),
-        volumeThreshold: this.config.get('CIRCUIT_VOLUME_THRESHOLD'),
-        resetTimeout: this.config.get('CIRCUIT_RESET_TIMEOUT_MS'),
+        timeout: this.config.get('PROVIDER_TIMEOUT_MS', { infer: true }),
+        errorThresholdPercentage: this.config.get('CIRCUIT_ERROR_THRESHOLD_PERCENTAGE', { infer: true }),
+        volumeThreshold: this.config.get('CIRCUIT_VOLUME_THRESHOLD', { infer: true }),
+        resetTimeout: this.config.get('CIRCUIT_RESET_TIMEOUT_MS', { infer: true }),
         errorFilter: (err) => err instanceof CepNotFoundError,
         name: provider.name,
       },
@@ -92,29 +104,28 @@ export class CircuitBreakerFactory implements OnModuleDestroy {
     return breaker;
   }
 
-  private attachTelemetry(breaker: CircuitBreaker, name: string) {
-    breaker.on('open', () => {
-      logger.warn({ provider: name }, 'circuit opened');
-      circuitStateMetric.record(2, { provider: name });
-    });
-    breaker.on('halfOpen', () => {
-      logger.info({ provider: name }, 'circuit half-open');
-      circuitStateMetric.record(1, { provider: name });
-    });
-    breaker.on('close', () => {
-      logger.info({ provider: name }, 'circuit closed');
-      circuitStateMetric.record(0, { provider: name });
-    });
-    breaker.on('reject', () => {
-      circuitRejectionsCounter.add(1, { provider: name });
-    });
+  all(): { name: string; breaker: CepBreaker }[] {
+    return Array.from(this.breakers.entries()).map(([name, breaker]) => ({ name, breaker }));
   }
 
-  onModuleDestroy() {
+  private attachTelemetry(breaker: CepBreaker, name: string): void {
+    breaker.on('open',     () => this.logger.warn({ provider: name }, 'circuit opened'));
+    breaker.on('halfOpen', () => this.logger.log ({ provider: name }, 'circuit half-open'));
+    breaker.on('close',    () => this.logger.log ({ provider: name }, 'circuit closed'));
+  }
+
+  onModuleDestroy(): void {
     for (const b of this.breakers.values()) b.shutdown();
+    this.breakers.clear();
   }
 }
 ```
+
+**Por que ObservableGauge e não counter/setter manual?** Com `UpDownCounter` precisaríamos
+emitir `+1/-1` em cada transição de estado — se um evento for perdido (ex: listener falha),
+o valor reportado fica errado permanentemente. Com `ObservableGauge`, o OTel pergunta o
+estado atual do breaker no momento do export (a cada 10s). A fonte da verdade é sempre o
+próprio `breaker.opened` / `breaker.halfOpen`.
 
 ## Uso no service
 
@@ -169,6 +180,7 @@ O opossum tem timeout próprio (`timeout: 3000`). Passamos `AbortSignal` **mesmo
 
 ## Testes
 Circuit breaker real é difícil de testar por causa de timing. Prefira:
-- **Service com breaker mockado** (`{ opened: true, fire: jest.fn() }`) — testa lógica do service
-- **Teste dedicado do factory** — garante que parâmetros vão certos pro opossum
+- **Service com breaker mockado** (`{ opened: true, halfOpen: false, fire: jest.fn() }`) — testa lógica do service
 - Deixe testes de comportamento do breaker pra biblioteca (já é testada)
+
+O `cep.service.spec.ts` cobre o caminho com `breaker.opened = true` (provider pulado) e mudança de estado entre chamadas consecutivas — sem tocar o opossum real.

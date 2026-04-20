@@ -8,13 +8,13 @@ API NestJS que expõe `GET /cep/:cep`. Consulta providers externos (ViaCEP, Bras
 | Dependência | Por quê |
 |---|---|
 | `@nestjs/*` | Requisito do desafio. DI ajuda a plugar providers. |
-| `axios` | HTTP client. Pode ser `fetch` nativo, mas axios tem interceptors úteis. |
+| **`fetch` nativo (Node 20+)** | Built-in, zero dependência, `AbortSignal.timeout()` nativo, `Response` WHATWG-padrão. Axios seria peso extra sem ganho. |
 | `opossum` | Circuit breaker maduro, API simples, eventos pra telemetria. |
-| `lru-cache` | LRU in-process com TTL. Zero infra. |
+| `lru-cache` v11 | LRU in-process com TTL. Zero infra. |
 | `zod` | Validação de schema. Usado tanto em env quanto em resposta de providers. |
-| `pino` | Logger estruturado rápido. |
+| `nestjs-pino` + `pino` | Logger estruturado rápido, com pino-http já ligado no Nest. |
 | `@opentelemetry/*` | Traces + métricas. Exporter OTLP pro New Relic. |
-| `nock` (dev) | Mock HTTP em testes. |
+| `@nestjs/testing` + `supertest` | Test runner e E2E. |
 
 ## Estrutura de pastas
 
@@ -27,14 +27,15 @@ src/
     cep.controller.ts
     cep.service.ts                # orquestra cache → selector → providers
     dto/
-      cep-param.dto.ts            # valida + normaliza o :cep
+      cep-param.dto.ts            # pipe + normalizeCep() (remove hífen, valida \d{8})
       cep-response.dto.ts
     errors/
       cep.errors.ts               # hierarquia de erros
     providers/
-      cep-provider.interface.ts
+      cep-provider.interface.ts   # + token CEP_PROVIDERS
       viacep.provider.ts
       brasilapi.provider.ts
+      fetch-error.mapper.ts       # AbortError → ProviderTimeout, resto → ProviderNetwork
       provider-selector.service.ts
       circuit-breaker.factory.ts
     cache/
@@ -48,19 +49,27 @@ src/
     middleware/
       correlation-id.middleware.ts
     logging/
-      logger.ts
+      logger.module.ts            # nestjs-pino + mixin com traceId/spanId
     telemetry/
       otel-setup.ts
-      tracer.ts
+      tracer.ts                   # tracer + 8 métricas
   config/
     config.module.ts
     env.validation.ts             # Zod no process.env
   health/
+    health.module.ts
     health.controller.ts          # /health/live + /health/ready
 test/
-  unit/
-  integration/
-  e2e/
+  fixtures/mock-cep-data.ts
+  unit/                           # service, selector, pipe, health
+  integration/                    # providers com jest.spyOn(globalThis, 'fetch')
+  e2e/                            # endpoint completo com supertest
+  jest-e2e.json
+Dockerfile                        # multi-stage (deps / build / runtime) + tini
+docker-compose.yml                # healthcheck + log rotation
+Makefile                          # conveniência: make dev, make docker, make test
+.env.example
+.dockerignore
 ```
 
 ## Módulos
@@ -91,14 +100,22 @@ Detalhes em [FLUXO.md](./FLUXO.md).
 
 ## Decisões arquiteturais
 
-### DI dos providers com multi-provider
+### DI dos providers via `useFactory` (Nest não tem `multi: true` como Angular)
 ```ts
 providers: [
-  { provide: CEP_PROVIDERS, useClass: ViaCepProvider, multi: true },
-  { provide: CEP_PROVIDERS, useClass: BrasilApiProvider, multi: true },
+  ViaCepProvider,
+  BrasilApiProvider,
+  {
+    provide: CEP_PROVIDERS,
+    useFactory: (viacep: ViaCepProvider, brasilapi: BrasilApiProvider) => [
+      viacep,
+      brasilapi,
+    ],
+    inject: [ViaCepProvider, BrasilApiProvider],
+  },
 ]
 ```
-`ProviderSelectorService` recebe o array inteiro. Adicionar provider = uma linha no módulo.
+`ProviderSelectorService` recebe o array inteiro via `@Inject(CEP_PROVIDERS)`. Adicionar provider = adicionar classe + linha na factory.
 
 ### Circuit breaker por provider, não global
 ViaCEP degradado não deve derrubar BrasilAPI. Um `Map<providerName, CircuitBreaker>` no factory.

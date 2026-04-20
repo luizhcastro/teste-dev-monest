@@ -9,7 +9,7 @@ Export via OTLP para o **New Relic**.
 |---|---|---|
 | Portabilidade | Trocar vendor = trocar URL | Lock-in |
 | Padrão | Open standard, CNCF | Proprietário |
-| Instrumentação | Auto (http, nest, axios) | Auto |
+| Instrumentação | Auto (http, nestjs-core) | Auto |
 | Suporte NR | OTLP nativo, feature parity | — |
 | Curva | Mais verboso no setup | Mais simples |
 
@@ -55,7 +55,11 @@ if (endpoint && apiKey) {
 
   sdk.start();
 
-  process.on('SIGTERM', () => sdk.shutdown().finally(() => process.exit(0)));
+  const shutdown = () => {
+    void sdk.shutdown().catch(() => undefined).finally(() => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 ```
 
@@ -80,14 +84,23 @@ Sem `NEW_RELIC_LICENSE_KEY` definida → SDK não sobe, app funciona normal (dev
 
 ## Correlation ID
 
+O `pino-http` (via `nestjs-pino`) já faz o trabalho pesado através do `genReqId`:
+lê `X-Correlation-Id` do request ou gera UUID, seta no response header e
+atribui em `req.id`. O middleware apenas **publica** esse id no request object
+e no span ativo do OTel:
+
 ```ts
 // src/common/middleware/correlation-id.middleware.ts
 @Injectable()
 export class CorrelationIdMiddleware implements NestMiddleware {
-  use(req: Request, res: Response, next: NextFunction) {
-    const id = (req.headers['x-correlation-id'] as string) ?? randomUUID();
-    (req as any).correlationId = id;
-    res.setHeader('X-Correlation-Id', id);
+  use(req: Request, res: Response, next: NextFunction): void {
+    const r = req as Request & { id?: string | number; correlationId: string };
+    const id = (r.id !== undefined ? String(r.id) : undefined) ?? randomUUID();
+
+    r.correlationId = id;
+    if (!res.getHeader('X-Correlation-Id')) {
+      res.setHeader('X-Correlation-Id', id);
+    }
 
     const span = trace.getActiveSpan();
     span?.setAttribute('correlation.id', id);
@@ -97,7 +110,17 @@ export class CorrelationIdMiddleware implements NestMiddleware {
 }
 ```
 
-Aplicado globalmente em `AppModule.configure()`.
+```ts
+// src/common/logging/logger.module.ts — genReqId no pino-http
+genReqId: (req, res) => {
+  const incoming = req.headers['x-correlation-id'];
+  const id = (typeof incoming === 'string' && incoming.trim()) || randomUUID();
+  res.setHeader('X-Correlation-Id', id);
+  return id;
+},
+```
+
+Middleware aplicado globalmente em `AppModule.configure()`.
 
 ## Spans custom
 
@@ -146,7 +169,7 @@ export const cepLookupTotal = meter.createCounter('cep_lookup_total');
 export const cepLookupDuration = meter.createHistogram('cep_lookup_duration_seconds');
 export const providerRequestsTotal = meter.createCounter('cep_provider_requests_total');
 export const providerDuration = meter.createHistogram('cep_provider_duration_seconds');
-export const circuitStateGauge = meter.createUpDownCounter('cep_circuit_state');
+export const circuitStateGauge = meter.createObservableGauge('cep_circuit_state');
 export const cacheHitsTotal = meter.createCounter('cep_cache_hits_total');
 export const cacheMissesTotal = meter.createCounter('cep_cache_misses_total');
 export const cacheStaleHitsTotal = meter.createCounter('cep_cache_stale_hits_total');
@@ -160,34 +183,71 @@ export const cacheStaleHitsTotal = meter.createCounter('cep_cache_stale_hits_tot
 | `cep_lookup_duration_seconds` | histogram | `status` |
 | `cep_provider_requests_total` | counter | `provider`, `outcome` (ok, timeout, http_error, network_error, contract_error, not_found) |
 | `cep_provider_duration_seconds` | histogram | `provider`, `outcome` |
-| `cep_circuit_state` | gauge | `provider` — 0=closed, 1=half, 2=open |
+| `cep_circuit_state` | observable gauge | `provider` — 0=closed, 1=half-open, 2=open |
 | `cep_cache_hits_total` | counter | — |
 | `cep_cache_misses_total` | counter | — |
 | `cep_cache_stale_hits_total` | counter | — |
 
-## Logs (pino)
+### Observable gauge — padrão pull
+
+`circuitStateGauge` não é setado manualmente a cada mudança de estado. Ele
+registra um callback no `onModuleInit` do `CircuitBreakerFactory`, e o OTel
+invoca esse callback no intervalo de export (10s) para ler o estado atual:
 
 ```ts
-// src/common/logging/logger.ts
-import pino from 'pino';
+// src/cep/providers/circuit-breaker.factory.ts
+onModuleInit(): void {
+  circuitStateGauge.addCallback((result) => {
+    for (const { name, breaker } of this.all()) {
+      const state = breaker.opened ? 2 : breaker.halfOpen ? 1 : 0;
+      result.observe(state, { provider: name });
+    }
+  });
+}
+```
+
+Vantagem sobre `UpDownCounter`: o valor reportado é sempre o **estado real do
+breaker** no momento do export. Sem risco de divergência se um evento `open`/
+`close` for perdido.
+
+## Logs (pino via nestjs-pino)
+
+```ts
+// src/common/logging/logger.module.ts (resumido)
+import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import { trace } from '@opentelemetry/api';
 
-export const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-  formatters: {
-    level: (label) => ({ level: label }),
-  },
-  mixin: () => {
-    const span = trace.getActiveSpan();
-    if (!span) return {};
-    const ctx = span.spanContext();
-    return {
-      traceId: ctx.traceId,
-      spanId: ctx.spanId,
-    };
-  },
-});
+@Module({
+  imports: [
+    PinoLoggerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config) => ({
+        pinoHttp: {
+          level: config.get('LOG_LEVEL'),
+          transport: isDev ? { target: 'pino-pretty', options: { ... } } : undefined,
+
+          // correlation id: lê header ou gera UUID — seta em req.id + response
+          genReqId: (req, res) => { /* ... */ },
+          customProps: (req) => ({ correlationId: req.id }),
+
+          // mixin: injeta traceId/spanId em todo log a partir do span ativo
+          mixin: () => {
+            const span = trace.getActiveSpan();
+            if (!span) return {};
+            const ctx = span.spanContext();
+            return { traceId: ctx.traceId, spanId: ctx.spanId };
+          },
+        },
+      }),
+    }),
+  ],
+  exports: [PinoLoggerModule],
+})
+export class LoggerModule {}
 ```
+
+Uso no service: `constructor(private readonly logger: PinoLogger) { this.logger.setContext(CepService.name); }`.
 
 ### Campos padrão em todo log
 - `correlationId`

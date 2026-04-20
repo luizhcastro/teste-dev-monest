@@ -7,13 +7,15 @@ GET /cep/:cep
     │
     ▼
 ┌────────────────────────────┐
-│ correlation-id middleware  │  lê X-Correlation-Id ou gera UUID v4
-└────────────────────────────┘  anexa em req + response header
+│ pino-http (genReqId)       │  lê X-Correlation-Id ou gera UUID v4
+│ + correlation-id middleware│  publica em req.correlationId + span OTel
+└────────────────────────────┘  response header X-Correlation-Id setado
     │
     ▼
 ┌────────────────────────────┐
-│ CepParamDto (class-valid.) │  regex /^\d{8}$/ após remover "-"
-└────────────────────────────┘  falha → InvalidCepError → [400]
+│ CepParamPipe               │  normalizeCep() → só dígitos
+│                            │  regex /^\d{8}$/ valida
+└────────────────────────────┘  falha → BadRequestException → [400]
     │
     ▼
 ┌────────────────────────────┐
@@ -66,7 +68,7 @@ CEP inexistente é resposta de negócio legítima. Um provider diz "não existe"
 - Pode mascarar bugs (se as duas APIs divergem no que consideram "existir")
 
 ### 400 é antes de qualquer provider
-Validação de formato acontece no DTO do Nest. Zero chamada externa se o input é inválido.
+Validação de formato acontece no `CepParamPipe` antes do controller. Zero chamada externa se o input é inválido.
 
 ### 503 inclui tentativas detalhadas
 ```json
@@ -89,8 +91,11 @@ Com `allowStale: true` no LRU, se ambos providers caírem E houver entrada stale
 ### Ambos circuitos abertos
 Não chamamos ninguém. 503 imediato. Isso **protege as APIs externas** enquanto se recuperam (evita thundering herd quando voltarem).
 
-### Timeout é local, não só do axios
-`AbortController` + `setTimeout(3000)` garante que a Promise não fica pendurada mesmo se o axios bugar. `breaker.fire(cep, signal)` passa o signal pro provider.
+### Timeout em dois níveis
+- **`AbortSignal.timeout(3000)`** passado pro `fetch` nativo → cancela a conexão TCP
+- **`timeout: 3000`** no opossum → rejeita a Promise do breaker
+
+Ambos apontam pro mesmo valor. Sem o `AbortSignal`, o opossum rejeitaria mas a chamada HTTP ficaria pendurada consumindo socket. Sem o timeout do opossum, erro no `AbortSignal` seria o único caminho.
 
 ### Round-robin em baixo tráfego
 Com 2 providers e baixo volume, round-robin estrito distribui ~50/50. Se um está com latência alta, o cliente vê latência intermitente. Isso é **intencional** — um provider lento deveria ter o circuito aberto, não ser "evitado silenciosamente".

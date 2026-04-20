@@ -10,8 +10,8 @@ README diz: *"não avaliamos cobertura de 100%"*. Então: **teste o design, não
         ╱  ╲     E2E (2-3 testes)
        ╱────╲    Golden paths via HTTP
       ╱      ╲
-     ╱────────╲  Integration (por provider + module)
-    ╱          ╲ Com nock mockando HTTP externo
+     ╱────────╲  Integration (por provider)
+    ╱          ╲ Com jest.spyOn(globalThis, 'fetch')
    ╱────────────╲
   ╱              ╲ Unit (service, selector, cache, errors)
  ╱________________╲
@@ -41,27 +41,32 @@ README diz: *"não avaliamos cobertura de 100%"*. Então: **teste o design, não
 | Ferramenta | Uso |
 |---|---|
 | **Jest** | Test runner (padrão do Nest) |
-| **nock** | Intercepta HTTP externo (providers) |
+| **`jest.spyOn(globalThis, 'fetch')`** | Intercepta HTTP externo dos providers — sem lib extra, usa a Fetch API nativa |
 | **supertest** | E2E do endpoint |
 | `@nestjs/testing` | Monta módulo de teste com DI |
+
+**Por que não `nock`?** Como o código usa `fetch` nativo (não axios + http adapter), `jest.spyOn` no `globalThis.fetch` mock é mais direto e não carrega dependência extra. Retornamos `new Response(JSON.stringify(body), { status, headers })` — mesma API que o runtime usa.
 
 ## Estrutura
 
 ```
 test/
+  fixtures/
+    mock-cep-data.ts
   unit/
     cep.service.spec.ts
     provider-selector.service.spec.ts
-    cep-cache.service.spec.ts
-    cep.errors.spec.ts
-    cep-exception.filter.spec.ts
-    cep-param.dto.spec.ts
+    cep-param.pipe.spec.ts
+    health.controller.spec.ts
   integration/
-    viacep.provider.spec.ts       # com nock
-    brasilapi.provider.spec.ts    # com nock
+    viacep.provider.spec.ts       # jest.spyOn(globalThis, 'fetch')
+    brasilapi.provider.spec.ts    # jest.spyOn(globalThis, 'fetch')
   e2e/
-    cep.e2e-spec.ts               # com nock + supertest
+    cep.e2e-spec.ts               # fetch mock + supertest
+  jest-e2e.json
 ```
+
+**Total atual:** 34 testes unit+integration + 9 e2e = **43 testes** verdes.
 
 ## CepService (o mais importante)
 
@@ -186,78 +191,85 @@ describe('ProviderSelectorService', () => {
 });
 ```
 
-## ViaCepProvider (integration com nock)
+## ViaCepProvider (integration com fetch mock)
 
 ```ts
-describe('ViaCepProvider', () => {
-  let provider: ViaCepProvider;
+function mockFetch(impl: typeof fetch) {
+  return jest.spyOn(globalThis, 'fetch').mockImplementation(impl as never);
+}
 
-  beforeEach(() => {
-    provider = new ViaCepProvider({ baseUrl: 'https://viacep.com.br' });
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
   });
+}
 
-  afterEach(() => nock.cleanAll());
+describe('ViaCepProvider', () => {
+  afterEach(() => jest.restoreAllMocks());
 
-  it('parseia resposta com sucesso', async () => {
-    nock('https://viacep.com.br')
-      .get('/ws/01310100/json/')
-      .reply(200, {
+  it('parseia resposta com sucesso e normaliza campos', async () => {
+    mockFetch(async () =>
+      jsonResponse(200, {
         cep: '01310-100',
-        logradouro: 'Av Paulista',
+        logradouro: 'Avenida Paulista',
         bairro: 'Bela Vista',
         localidade: 'São Paulo',
         uf: 'SP',
-      });
+      }),
+    );
 
+    const provider = makeProvider();
     const data = await provider.fetch('01310100', new AbortController().signal);
 
     expect(data).toEqual({
       cep: '01310100',
-      street: 'Av Paulista',
+      street: 'Avenida Paulista',
       neighborhood: 'Bela Vista',
       city: 'São Paulo',
       state: 'SP',
     });
   });
 
-  it('`{erro:true}` → CepNotFoundError', async () => {
-    nock('https://viacep.com.br')
-      .get('/ws/00000000/json/')
-      .reply(200, { erro: true });
-
-    await expect(provider.fetch('00000000', new AbortController().signal))
-      .rejects.toBeInstanceOf(CepNotFoundError);
+  it('{erro:true} → CepNotFoundError', async () => {
+    mockFetch(async () => jsonResponse(200, { erro: true }));
+    await expect(
+      makeProvider().fetch('00000000', new AbortController().signal),
+    ).rejects.toBeInstanceOf(CepNotFoundError);
   });
 
-  it('contrato quebrado → ProviderContractError', async () => {
-    nock('https://viacep.com.br')
-      .get('/ws/01310100/json/')
-      .reply(200, { unexpected: 'payload' });
-
-    await expect(provider.fetch('01310100', new AbortController().signal))
-      .rejects.toBeInstanceOf(ProviderContractError);
-  });
-
-  it('timeout via AbortSignal', async () => {
-    nock('https://viacep.com.br')
-      .get('/ws/01310100/json/')
-      .delay(5000)
-      .reply(200, {});
-
-    const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), 100);
-
-    await expect(provider.fetch('01310100', ctrl.signal))
-      .rejects.toBeInstanceOf(ProviderTimeoutError);
+  it('contrato diferente → ProviderContractError', async () => {
+    mockFetch(async () => jsonResponse(200, { inesperado: 'payload' }));
+    await expect(
+      makeProvider().fetch('01310100', new AbortController().signal),
+    ).rejects.toBeInstanceOf(ProviderContractError);
   });
 
   it('5xx → ProviderHttpError', async () => {
-    nock('https://viacep.com.br')
-      .get('/ws/01310100/json/')
-      .reply(503);
+    mockFetch(async () => new Response('', { status: 503 }));
+    await expect(
+      makeProvider().fetch('01310100', new AbortController().signal),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+  });
 
-    await expect(provider.fetch('01310100', new AbortController().signal))
-      .rejects.toBeInstanceOf(ProviderHttpError);
+  it('AbortSignal cancela → ProviderTimeoutError', async () => {
+    mockFetch(async (_url, init) => {
+      const signal = (init as RequestInit).signal!;
+      return new Promise<Response>((_r, reject) => {
+        signal.addEventListener('abort', () => {
+          const err = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        }, { once: true });
+      });
+    });
+
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 20);
+
+    await expect(
+      makeProvider().fetch('01310100', ctrl.signal),
+    ).rejects.toBeInstanceOf(ProviderTimeoutError);
   });
 });
 ```
@@ -277,12 +289,15 @@ describe('GET /cep/:cep (e2e)', () => {
   });
 
   afterAll(() => app.close());
-  afterEach(() => nock.cleanAll());
+  afterEach(() => jest.restoreAllMocks());
 
   it('golden path', async () => {
-    nock('https://brasilapi.com.br')
-      .get('/api/cep/v1/01310100')
-      .reply(200, mockBrasilApiResponse);
+    jest.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('brasilapi.com.br')) {
+        return jsonResponse(200, mockBrasilApiResponse);
+      }
+      return jsonResponse(500, {});
+    });
 
     const res = await request(app.getHttpServer()).get('/cep/01310100');
 
@@ -299,17 +314,17 @@ describe('GET /cep/:cep (e2e)', () => {
   });
 
   it('normaliza hífen', async () => {
-    nock('https://brasilapi.com.br')
-      .get('/api/cep/v1/01310100')
-      .reply(200, mockBrasilApiResponse);
-
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(200, mockBrasilApiResponse),
+    );
     const res = await request(app.getHttpServer()).get('/cep/01310-100');
     expect(res.status).toBe(200);
   });
 
   it('todos caem → 503 com attempts', async () => {
-    nock('https://brasilapi.com.br').get(/.*/).reply(503);
-    nock('https://viacep.com.br').get(/.*/).reply(503);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('', { status: 503 }),
+    );
 
     const res = await request(app.getHttpServer()).get('/cep/01310100');
 
@@ -320,9 +335,25 @@ describe('GET /cep/:cep (e2e)', () => {
 });
 ```
 
+### Health E2E
+
+```ts
+it('GET /health/live → 200', async () => {
+  const res = await request(app.getHttpServer()).get('/health/live');
+  expect(res.status).toBe(200);
+  expect(res.body.status).toBe('ok');
+});
+
+it('GET /health/ready → 200 com circuitos fechados', async () => {
+  const res = await request(app.getHttpServer()).get('/health/ready');
+  expect(res.status).toBe(200);
+  expect(res.body.status).toBe('ready');
+});
+```
+
 ## O que NÃO testar
 
-- **Bibliotecas** (opossum, axios, lru-cache, zod) — confia
+- **Bibliotecas** (opossum, lru-cache, zod, pino) — confia
 - **Nest internals** (DI, middleware wiring)
 - **OTel** — basta testar que chamamos as APIs certas; comportamento é da biblioteca
 - **Circuit breaker real** — timing é instável; mock é mais confiável
