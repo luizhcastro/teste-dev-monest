@@ -3,23 +3,34 @@ import {
   Injectable,
   Logger,
   OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import CircuitBreaker from 'opossum';
 import type { Env } from '../../config/env.validation';
+import { circuitStateGauge } from '../../common/telemetry/tracer';
 import { CepNotFoundError } from '../errors/cep.errors';
 import type { CepData, CepProvider } from './cep-provider.interface';
 
 export type CepBreaker = CircuitBreaker<[string, AbortSignal], CepData>;
 
 @Injectable()
-export class CircuitBreakerFactory implements OnModuleDestroy {
+export class CircuitBreakerFactory implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CircuitBreakerFactory.name);
   private readonly breakers = new Map<string, CepBreaker>();
 
   constructor(
     @Inject(ConfigService) private readonly config: ConfigService<Env, true>,
   ) {}
+
+  onModuleInit(): void {
+    circuitStateGauge.addCallback((result) => {
+      for (const { name, breaker } of this.all()) {
+        const state = breaker.opened ? 2 : breaker.halfOpen ? 1 : 0;
+        result.observe(state, { provider: name });
+      }
+    });
+  }
 
   get(provider: CepProvider): CepBreaker {
     const existing = this.breakers.get(provider.name);
