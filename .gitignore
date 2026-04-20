@@ -26,6 +26,7 @@ yarn-error.log*
 # IDE
 /.idea
 *.swp
+/.claude
 
 # Nest
 .eslintcache
