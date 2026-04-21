@@ -98,7 +98,7 @@ export class CepService {
               throw err;
             }
 
-            const reason = this.reasonOf(err, breaker.opened);
+            const reason = this.reasonOf(err);
             attempts.push({ provider: provider.name, reason, latencyMs });
             this.recordProviderMetrics(provider.name, reason, latencyMs);
             this.logger.warn(
@@ -154,18 +154,17 @@ export class CepService {
     providerDuration.record(latencyMs / 1000, { provider, outcome });
   }
 
-  private reasonOf(err: unknown, breakerOpened: boolean): string {
+  /**
+   * Classifica o erro para o campo `reason` do attempt.
+   *
+   * Só `ProviderError` tem `reason` estruturada. Qualquer outro erro aqui
+   * é inesperado — circuito aberto é interceptado pelo pre-check de
+   * `breaker.opened` antes do `fire`, e o timeout do opossum foi desligado
+   * (fonte única = `AbortSignal` → `ProviderTimeoutError`).
+   */
+  private reasonOf(err: unknown): string {
     if (err instanceof ProviderError) {
       return err.reason;
-    }
-    if (breakerOpened) {
-      return 'circuit_open';
-    }
-    if (err instanceof Error && /breaker is open/i.test(err.message)) {
-      return 'circuit_open';
-    }
-    if (err instanceof Error && /timed out/i.test(err.message)) {
-      return 'timeout';
     }
     return 'unknown';
   }

@@ -1,4 +1,16 @@
-import { Controller, Get, HttpCode, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+  getSchemaPath,
+} from '@nestjs/swagger';
 import { CircuitBreakerFactory } from '../cep/providers/circuit-breaker.factory';
 
 type CircuitState = 'closed' | 'half_open' | 'open';
@@ -13,17 +25,63 @@ interface ReadyResponse {
   circuits: CircuitStatus[];
 }
 
+@ApiTags('health')
 @Controller('health')
 export class HealthController {
   constructor(private readonly breakerFactory: CircuitBreakerFactory) {}
 
   @Get('live')
   @HttpCode(200)
+  @ApiOperation({
+    summary: 'Liveness probe',
+    description: 'Retorna 200 enquanto o processo estiver de pé.',
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: { status: { type: 'string', example: 'ok' } },
+    },
+  })
   live(): { status: 'ok' } {
     return { status: 'ok' };
   }
 
   @Get('ready')
+  @ApiOperation({
+    summary: 'Readiness probe',
+    description:
+      'Retorna 200 se pelo menos um circuito está disponível (closed ou half-open). 503 quando todos os circuitos estão abertos — sinaliza pro load balancer parar de mandar tráfego sem matar o pod.',
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'ready' },
+        circuits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              provider: { type: 'string', example: 'viacep' },
+              state: {
+                type: 'string',
+                enum: ['closed', 'half_open', 'open'],
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiServiceUnavailableResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'not_ready' },
+        circuits: { type: 'array', items: { $ref: getSchemaPath(Object) } },
+      },
+    },
+  })
   ready(): ReadyResponse {
     const circuits = this.breakerFactory.all().map(({ name, breaker }) => ({
       provider: name,

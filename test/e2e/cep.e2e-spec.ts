@@ -168,3 +168,75 @@ describe('CEP API (e2e)', () => {
     expect(headerValue).toBe(cid);
   });
 });
+
+/**
+ * Cenário crítico do bug §3.1 do feedback:
+ *   TTL expira → todos os providers 5xx → API deve servir stale do cache.
+ *
+ * Sobe uma app separada com CACHE_TTL_MS=50 pra simular expiração rápida.
+ */
+describe('CEP API — stale cache fallback (e2e)', () => {
+  let app: INestApplication;
+  const originalTtl = process.env.CACHE_TTL_MS;
+
+  beforeAll(async () => {
+    process.env.CACHE_TTL_MS = '50';
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleRef.createNestApplication({ logger: false });
+    app.useGlobalFilters(new CepExceptionFilter());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    if (originalTtl === undefined) delete process.env.CACHE_TTL_MS;
+    else process.env.CACHE_TTL_MS = originalTtl;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('popula cache, TTL expira, providers caem → 200 com cached=true (stale)', async () => {
+    // 1) primeira request popula o cache
+    mockFetchImpl(async (url) => {
+      const u = String(url);
+      if (u.includes('viacep')) {
+        return jsonResponse(200, {
+          cep: '04567-890',
+          logradouro: 'Rua Teste',
+          bairro: 'Centro',
+          localidade: 'São Paulo',
+          uf: 'SP',
+        });
+      }
+      return jsonResponse(500, {});
+    });
+
+    const warm = await request(app.getHttpServer()).get('/cep/04567890');
+    expect(warm.status).toBe(200);
+    expect(warm.body.cached).toBe(false);
+
+    jest.restoreAllMocks();
+
+    // 2) espera TTL expirar
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // 3) providers agora falham
+    mockFetchImpl(async () => new Response('', { status: 503 }));
+
+    const staleRes = await request(app.getHttpServer()).get('/cep/04567890');
+
+    // serviu stale (não 503)
+    expect(staleRes.status).toBe(200);
+    expect(staleRes.body).toMatchObject({
+      cep: '04567890',
+      street: 'Rua Teste',
+      cached: true,
+    });
+  });
+});
