@@ -36,7 +36,7 @@ describe('ViaCepProvider', () => {
     jest.restoreAllMocks();
   });
 
-  it('parseia resposta de sucesso e normaliza os campos', async () => {
+  it('parses successful response and normalizes fields', async () => {
     const spy = mockFetch(async () =>
       jsonResponse(200, {
         cep: '01310-100',
@@ -66,7 +66,7 @@ describe('ViaCepProvider', () => {
     );
   });
 
-  it('{erro:true} vira CepNotFoundError', async () => {
+  it('{erro:true} becomes CepNotFoundError', async () => {
     mockFetch(async () => jsonResponse(200, { erro: true }));
 
     const provider = makeProvider();
@@ -75,7 +75,7 @@ describe('ViaCepProvider', () => {
     ).rejects.toBeInstanceOf(CepNotFoundError);
   });
 
-  it('contrato diferente vira ProviderContractError', async () => {
+  it('unexpected contract becomes ProviderContractError', async () => {
     mockFetch(async () => jsonResponse(200, { inesperado: 'payload' }));
 
     const provider = makeProvider();

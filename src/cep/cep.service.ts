@@ -94,7 +94,7 @@ export class CepService {
               this.recordProviderMetrics(provider.name, 'not_found', latencyMs);
               this.recordLookupMetrics('not_found', lookupStart);
               span.setAttribute('cep.provider', provider.name);
-              span.setStatus({ code: SpanStatusCode.OK }); // 404 não é erro de servidor
+              span.setStatus({ code: SpanStatusCode.OK });
               throw err;
             }
 

@@ -38,7 +38,7 @@ describe('CEP API (e2e)', () => {
     jest.restoreAllMocks();
   });
 
-  it('GET /cep/:cep → 200 com dados normalizados (golden path)', async () => {
+  it('GET /cep/:cep → 200 with normalized data (golden path)', async () => {
     mockFetchImpl(async (url) => {
       const u = String(url);
       if (u.includes('viacep')) {
@@ -67,7 +67,7 @@ describe('CEP API (e2e)', () => {
     expect(typeof res.body.provider).toBe('string');
   });
 
-  it('GET /cep/:cep aceita CEP com hífen', async () => {
+  it('GET /cep/:cep accepts CEP with hyphen', async () => {
     mockFetchImpl(async () =>
       jsonResponse(200, {
         cep: '01310-100',
@@ -94,14 +94,14 @@ describe('CEP API (e2e)', () => {
     expect(res.body.correlationId).toBeDefined();
   });
 
-  it('GET /cep/12345 → 400 invalid_cep (menos de 8 dígitos)', async () => {
+  it('GET /cep/12345 → 400 invalid_cep (less than 8 digits)', async () => {
     const res = await request(app.getHttpServer()).get('/cep/12345');
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('invalid_cep');
   });
 
-  it('GET /cep/:cep não encontrado → 404', async () => {
+  it('GET /cep/:cep not found → 404', async () => {
     mockFetchImpl(async (url) => {
       const u = String(url);
       if (u.includes('viacep')) {
@@ -119,7 +119,7 @@ describe('CEP API (e2e)', () => {
     expect(res.body.correlationId).toBeDefined();
   });
 
-  it('GET /cep/:cep todos providers 5xx → 503 com attempts', async () => {
+  it('GET /cep/:cep all providers 5xx → 503 with attempts', async () => {
     mockFetchImpl(async () => new Response('', { status: 503 }));
 
     const res = await request(app.getHttpServer()).get('/cep/02040030');
@@ -139,14 +139,14 @@ describe('CEP API (e2e)', () => {
     expect(res.body).toEqual({ status: 'ok' });
   });
 
-  it('GET /health/ready → 200 ready (sem breakers ainda)', async () => {
+  it('GET /health/ready → 200 ready (no breakers yet)', async () => {
     const res = await request(app.getHttpServer()).get('/health/ready');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ready');
     expect(Array.isArray(res.body.circuits)).toBe(true);
   });
 
-  it('propaga X-Correlation-Id do request para a resposta', async () => {
+  it('propagates X-Correlation-Id from request to response', async () => {
     mockFetchImpl(async () =>
       jsonResponse(200, {
         cep: '01310-100',
@@ -163,7 +163,6 @@ describe('CEP API (e2e)', () => {
       .set('X-Correlation-Id', cid);
 
     expect(res.status).toBe(200);
-    // header de resposta pode variar, mas o middleware deve ecoar
     const headerValue =
       res.headers['x-correlation-id'] ?? res.headers['X-Correlation-Id'];
     expect(headerValue).toBe(cid);

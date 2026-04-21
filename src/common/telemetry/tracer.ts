@@ -11,7 +11,7 @@ export const cepLookupTotal = meter.createCounter('cep_lookup_total', {
 export const cepLookupDuration = meter.createHistogram(
   'cep_lookup_duration_seconds',
   {
-    description: 'Duração do lookup de CEP',
+    description: 'CEP lookup duration',
     unit: 's',
   },
 );
@@ -19,14 +19,14 @@ export const cepLookupDuration = meter.createHistogram(
 export const providerRequestsTotal = meter.createCounter(
   'cep_provider_requests_total',
   {
-    description: 'Requests feitos a cada provider',
+    description: 'Requests made to each provider',
   },
 );
 
 export const providerDuration = meter.createHistogram(
   'cep_provider_duration_seconds',
   {
-    description: 'Duração das chamadas aos providers',
+    description: 'Provider call duration',
     unit: 's',
   },
 );

@@ -10,15 +10,6 @@ export type RequestWithCorrelation = Request & {
   id?: string | number;
 };
 
-/**
- * Publica o correlation id:
- * - Fonte preferencial: `req.id` (já atribuído por `pino-http` via genReqId,
- *   que lê `X-Correlation-Id` ou gera UUID)
- * - Fallback: gera UUID (caso pino não esteja configurado)
- *
- * Anexa ao request (`req.correlationId`) e ao span ativo do OTel.
- * O response header é setado pelo próprio pino-http.
- */
 @Injectable()
 export class CorrelationIdMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {

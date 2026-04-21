@@ -34,7 +34,6 @@ describe('CepService', () => {
     breakerA = { opened: false, fire: jest.fn() };
     breakerB = { opened: false, fire: jest.fn() };
 
-    // Por padrão breaker.fire delega pro fetch do provider
     breakerA.fire.mockImplementation((cep, signal) =>
       providerA.fetch(cep, signal),
     );
@@ -85,7 +84,7 @@ describe('CepService', () => {
     service = moduleRef.get(CepService);
   });
 
-  it('retorna sucesso no primeiro provider e cacheia', async () => {
+  it('returns success from first provider and caches result', async () => {
     providerA.fetch.mockResolvedValue(mockCepData);
 
     const result = await service.lookup('01310100');
@@ -102,7 +101,7 @@ describe('CepService', () => {
     });
   });
 
-  it('faz fallback quando o primeiro dá timeout', async () => {
+  it('falls back when first provider times out', async () => {
     providerA.fetch.mockRejectedValue(new ProviderTimeoutError('A'));
     providerB.fetch.mockResolvedValue(mockCepData);
 
@@ -113,7 +112,7 @@ describe('CepService', () => {
     expect(providerB.fetch).toHaveBeenCalled();
   });
 
-  it('404 no primeiro NÃO dispara fallback (regra de ouro)', async () => {
+  it('404 from first provider does NOT trigger fallback (golden rule)', async () => {
     providerA.fetch.mockRejectedValue(new CepNotFoundError('00000000'));
 
     await expect(service.lookup('00000000')).rejects.toBeInstanceOf(
@@ -144,7 +143,7 @@ describe('CepService', () => {
     }
   });
 
-  it('cache hit fresh não chama provider', async () => {
+  it('fresh cache hit does not call provider', async () => {
     cache.get.mockReturnValue({ data: mockCachedData, stale: false });
 
     const result = await service.lookup('01310100');
@@ -155,7 +154,7 @@ describe('CepService', () => {
     expect(providerB.fetch).not.toHaveBeenCalled();
   });
 
-  it('todos falham mas tem stale → serve stale em vez de 503', async () => {
+  it('all providers fail but stale cache exists → serves stale instead of 503', async () => {
     cache.get.mockReturnValue({ data: mockCachedData, stale: true });
     providerA.fetch.mockRejectedValue(new ProviderTimeoutError('A'));
     providerB.fetch.mockRejectedValue(new ProviderTimeoutError('B'));
@@ -166,7 +165,7 @@ describe('CepService', () => {
     expect(result.provider).toBe(mockCachedData.provider);
   });
 
-  it('pula provider com circuito aberto', async () => {
+  it('skips provider with open circuit', async () => {
     breakerA.opened = true;
     providerB.fetch.mockResolvedValue(mockCepData);
 

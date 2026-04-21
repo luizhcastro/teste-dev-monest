@@ -36,7 +36,7 @@ describe('BrasilApiProvider', () => {
     jest.restoreAllMocks();
   });
 
-  it('parseia resposta de sucesso', async () => {
+  it('parses successful response', async () => {
     const spy = mockFetch(async () =>
       jsonResponse(200, {
         cep: '01310100',
@@ -67,7 +67,7 @@ describe('BrasilApiProvider', () => {
     );
   });
 
-  it('404 vira CepNotFoundError', async () => {
+  it('404 becomes CepNotFoundError', async () => {
     mockFetch(async () => jsonResponse(404, {}));
 
     const provider = makeProvider();
@@ -85,7 +85,7 @@ describe('BrasilApiProvider', () => {
     ).rejects.toBeInstanceOf(ProviderHttpError);
   });
 
-  it('contrato diferente vira ProviderContractError', async () => {
+  it('unexpected contract becomes ProviderContractError', async () => {
     mockFetch(async () => jsonResponse(200, { unexpected: 'field' }));
 
     const provider = makeProvider();

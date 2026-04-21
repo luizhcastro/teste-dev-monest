@@ -1,14 +1,3 @@
-/**
- * OpenTelemetry SDK bootstrap.
- *
- * Deve ser a PRIMEIRA linha importada de `main.ts` — as instrumentações
- * automáticas (http, nestjs-core) precisam registrar seus hooks antes de
- * qualquer outro módulo ser carregado.
- *
- * SDK só sobe se `NEW_RELIC_LICENSE_KEY` + `OTEL_EXPORTER_OTLP_ENDPOINT`
- * estiverem definidos. Em dev sem esses vars, o app roda normal — as
- * chamadas à API OTel viram no-op.
- */
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';

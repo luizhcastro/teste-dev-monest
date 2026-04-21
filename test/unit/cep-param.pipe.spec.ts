@@ -2,15 +2,15 @@ import { CepParamPipe, normalizeCep } from '../../src/cep/dto/cep-param.dto';
 import { InvalidCepError } from '../../src/cep/errors/cep.errors';
 
 describe('normalizeCep', () => {
-  it('remove hífen', () => {
+  it('removes hyphen', () => {
     expect(normalizeCep('01310-100')).toBe('01310100');
   });
 
-  it('mantém CEP só com dígitos', () => {
+  it('keeps CEP with digits only', () => {
     expect(normalizeCep('01310100')).toBe('01310100');
   });
 
-  it('remove espaços laterais', () => {
+  it('removes surrounding whitespace', () => {
     expect(normalizeCep('  01310100  ')).toBe('01310100');
   });
 });
@@ -18,27 +18,27 @@ describe('normalizeCep', () => {
 describe('CepParamPipe', () => {
   const pipe = new CepParamPipe();
 
-  it('aceita 8 dígitos', () => {
+  it('accepts 8 digits', () => {
     expect(pipe.transform('01310100')).toBe('01310100');
   });
 
-  it('aceita com hífen e normaliza', () => {
+  it('accepts hyphenated CEP and normalizes it', () => {
     expect(pipe.transform('01310-100')).toBe('01310100');
   });
 
-  it('rejeita letras', () => {
+  it('rejects letters', () => {
     expect(() => pipe.transform('abc')).toThrow(InvalidCepError);
   });
 
-  it('rejeita menos de 8 dígitos', () => {
+  it('rejects less than 8 digits', () => {
     expect(() => pipe.transform('12345')).toThrow(InvalidCepError);
   });
 
-  it('rejeita mais de 8 dígitos', () => {
+  it('rejects more than 8 digits', () => {
     expect(() => pipe.transform('123456789')).toThrow(InvalidCepError);
   });
 
-  it('rejeita string vazia', () => {
+  it('rejects empty string', () => {
     expect(() => pipe.transform('')).toThrow(InvalidCepError);
   });
 });

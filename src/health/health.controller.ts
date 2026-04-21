@@ -30,8 +30,6 @@ export class HealthController {
       state: this.stateOf(breaker.opened, breaker.halfOpen),
     }));
 
-    // Se nenhum breaker foi registrado ainda (ex: antes da primeira requisição),
-    // consideramos ready — há providers disponíveis, só não exercitados.
     const anyUp =
       circuits.length === 0 || circuits.some((c) => c.state !== 'open');
 
