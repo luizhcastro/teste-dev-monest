@@ -307,6 +307,43 @@ TIMESERIES
 FROM Log SELECT count(*) FACET cep SINCE 1 day ago LIMIT 20
 ```
 
+## Evidência em produção
+
+O ambiente publicado no Railway está exportando telemetria para o New Relic via
+OTLP. O dashboard operacional anexado nesta entrega mostra a instrumentação
+funcionando em produção, não apenas em ambiente local.
+
+### Dashboard operacional — CEP API em produção
+
+![Dashboard operacional da CEP API no New Relic](./assets/newrelic-dashboard.png)
+
+No dashboard do New Relic é possível ver:
+
+- volume de chamadas por minuto da rota de CEP
+- latência agregada em `p50`, `p95` e `p99`
+- resultado das consultas (`ok` e `cached`)
+- distribuição de chamadas por provider (`viacep` e `brasilapi`)
+- hit rate de cache ao longo do tempo
+- estado do circuit breaker por provider
+- ativação de rate limit
+- severidade dos logs emitidos
+- requisições recentes processadas com `status 200`
+- traces com erro e tempo por provider
+
+Isso demonstra que a aplicação expõe os sinais necessários para acompanhar
+volume, latência, cache, resiliência e comportamento operacional da rota de CEP
+em produção.
+
+### Como interpretar o dashboard
+
+O dashboard evidencia os principais pontos da observabilidade aplicada neste
+projeto:
+
+1. **Correlação ponta a ponta**: um request pode ser acompanhado por logs,
+   spans, métricas e atributos de contexto no mesmo fluxo.
+2. **Visão operacional**: o endpoint em produção pode ser analisado por volume,
+   duração, cache, provider e erro diretamente no New Relic.
+
 ## Alerts sugeridos
 
 | Alert | Condition |
