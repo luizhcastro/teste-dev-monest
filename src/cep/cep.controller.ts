@@ -20,7 +20,7 @@ import { CepResponseDto } from './dto/cep-response.dto';
   name: 'X-Correlation-Id',
   required: false,
   description:
-    'Correlation id opcional. Se ausente, um UUID v4 é gerado e ecoado no response.',
+    'Correlation id opcional. Se vier com UUID v4 válido, é reutilizado; caso contrário, a API gera um novo UUID v4 e o ecoa no response.',
 })
 @Controller('cep')
 export class CepController {

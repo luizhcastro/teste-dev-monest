@@ -295,8 +295,8 @@ curl -i http://localhost:3000/cep/00000000
 curl -s http://localhost:3000/health/live
 curl -s http://localhost:3000/health/ready | jq
 
-# Forçar correlation id
-curl -sH 'X-Correlation-Id: my-id' http://localhost:3000/cep/01310100
+# Forçar correlation id válido
+curl -sH 'X-Correlation-Id: 550e8400-e29b-41d4-a716-446655440000' http://localhost:3000/cep/01310100
 
 # Rate limit — com RATE_LIMIT_MAX=3 dispara 429 no 4º hit
 for i in 1 2 3 4; do curl -i -s http://localhost:3000/cep/01310100 | head -1; done

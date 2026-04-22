@@ -7,7 +7,7 @@ GET /cep/:cep
     │
     ▼
 ┌────────────────────────────┐
-│ pino-http (genReqId)       │  lê X-Correlation-Id ou gera UUID v4
+│ pino-http (genReqId)       │  aceita UUID v4 válido ou gera UUID v4
 │ + correlation-id middleware│  publica em req.correlationId + span OTel
 └────────────────────────────┘  response header X-Correlation-Id setado
     │
@@ -110,4 +110,6 @@ Por que fonte única: opossum com timeout ativo rejeita com erro não-tipado (`"
 Com 2 providers e baixo volume, round-robin estrito distribui ~50/50. Se um está com latência alta, o cliente vê latência intermitente. Isso é **intencional** — um provider lento deveria ter o circuito aberto, não ser "evitado silenciosamente".
 
 ### Header X-Correlation-Id
-Sempre presente na response — sucesso ou erro. Permite ao cliente reportar o ID ao oncall.
+Sempre presente na response — sucesso ou erro. Se o cliente enviar um valor
+inválido, a API gera um UUID v4 novo. Isso evita propagar payload arbitrário
+para logs, spans e headers de resposta.

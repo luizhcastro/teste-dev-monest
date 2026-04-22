@@ -85,9 +85,10 @@ Sem `NEW_RELIC_LICENSE_KEY` definida → SDK não sobe, app funciona normal (dev
 ## Correlation ID
 
 O `pino-http` (via `nestjs-pino`) já faz o trabalho pesado através do `genReqId`:
-lê `X-Correlation-Id` do request ou gera UUID, seta no response header e
-atribui em `req.id`. O middleware apenas **publica** esse id no request object
-e no span ativo do OTel:
+lê `X-Correlation-Id` do request, reutiliza apenas UUID v4 válido e, caso
+contrário, gera UUID novo; depois seta o valor no response header e atribui em
+`req.id`. O middleware apenas **publica** esse id no request object e no span
+ativo do OTel:
 
 ```ts
 // src/common/middleware/correlation-id.middleware.ts
@@ -114,7 +115,7 @@ export class CorrelationIdMiddleware implements NestMiddleware {
 // src/common/logging/logger.module.ts — genReqId no pino-http
 genReqId: (req, res) => {
   const incoming = req.headers['x-correlation-id'];
-  const id = (typeof incoming === 'string' && incoming.trim()) || randomUUID();
+  const id = resolveCorrelationId(incoming);
   res.setHeader('X-Correlation-Id', id);
   return id;
 },

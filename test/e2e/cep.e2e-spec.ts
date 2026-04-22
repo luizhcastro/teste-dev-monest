@@ -157,7 +157,7 @@ describe('CEP API (e2e)', () => {
       }),
     );
 
-    const cid = 'test-correlation-abc-123';
+    const cid = '550e8400-e29b-41d4-a716-446655440000';
     const res = await request(app.getHttpServer())
       .get('/cep/01310100')
       .set('X-Correlation-Id', cid);
@@ -166,6 +166,31 @@ describe('CEP API (e2e)', () => {
     const headerValue =
       res.headers['x-correlation-id'] ?? res.headers['X-Correlation-Id'];
     expect(headerValue).toBe(cid);
+  });
+
+  it('replaces an invalid X-Correlation-Id with a generated UUID v4', async () => {
+    mockFetchImpl(async () =>
+      jsonResponse(200, {
+        cep: '01310-100',
+        logradouro: 'Avenida Paulista',
+        bairro: 'Bela Vista',
+        localidade: 'São Paulo',
+        uf: 'SP',
+      }),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/cep/01310100')
+      .set('X-Correlation-Id', 'test-correlation-abc-123');
+
+    expect(res.status).toBe(200);
+    const headerValue =
+      res.headers['x-correlation-id'] ?? res.headers['X-Correlation-Id'];
+
+    expect(headerValue).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(headerValue).not.toBe('test-correlation-abc-123');
   });
 });
 

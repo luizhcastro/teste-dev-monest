@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { trace } from '@opentelemetry/api';
-import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import type { Env } from '../../config/env.validation';
+import { resolveCorrelationId } from './correlation-id';
 
 const CORRELATION_HEADER_LOWER = 'x-correlation-id';
 const CORRELATION_HEADER_RESPONSE = 'X-Correlation-Id';
@@ -52,9 +52,7 @@ const CORRELATION_HEADER_RESPONSE = 'X-Correlation-Id';
 
             genReqId: (req: IncomingMessage, res: ServerResponse) => {
               const incoming = req.headers[CORRELATION_HEADER_LOWER];
-              const id =
-                (typeof incoming === 'string' && incoming.trim()) ||
-                randomUUID();
+              const id = resolveCorrelationId(incoming);
               res.setHeader(CORRELATION_HEADER_RESPONSE, id);
               return id;
             },

@@ -1,7 +1,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { trace } from '@opentelemetry/api';
-import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
+import { resolveCorrelationId } from '../logging/correlation-id';
 
 const RESPONSE_HEADER = 'X-Correlation-Id';
 
@@ -14,7 +14,7 @@ export type RequestWithCorrelation = Request & {
 export class CorrelationIdMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     const r = req as RequestWithCorrelation;
-    const id = (r.id !== undefined ? String(r.id) : undefined) ?? randomUUID();
+    const id = resolveCorrelationId(r.id);
 
     r.correlationId = id;
     if (!res.getHeader(RESPONSE_HEADER)) {
