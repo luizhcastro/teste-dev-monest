@@ -47,9 +47,22 @@ export class CepCacheService {
     });
   }
 
+  /**
+   * Detalhe sutil do lru-cache v11: com `allowStale: true` no construtor,
+   * `cache.get(key)` em entrada expirada retorna o valor stale E **remove a
+   * entrada** na mesma chamada. Sem guarda, o ramo `stale: true` nunca
+   * dispararia — a primeira leitura devolveria stale como se fosse fresh.
+   *
+   * `getRemainingTTL`:
+   *   > 0  — fresco
+   *   < 0  — expirado (mas ainda presente por allowStale)
+   *   = 0  — ausente
+   */
   get(cep: string): CacheLookup | undefined {
-    const fresh = this.cache.get(cep);
-    if (fresh !== undefined) return { data: fresh, stale: false };
+    if (this.cache.getRemainingTTL(cep) > 0) {
+      const fresh = this.cache.get(cep);
+      if (fresh !== undefined) return { data: fresh, stale: false };
+    }
 
     const stale = this.cache.get(cep, { allowStale: true });
     if (stale !== undefined) return { data: stale, stale: true };

@@ -35,6 +35,11 @@ README diz: *"não avaliamos cobertura de 100%"*. Então: **teste o design, não
 14. **DTO: normalização de CEP (remove hífen, aceita só dígitos)**
 15. **E2E: GET /cep/:cep golden path**
 16. **E2E: GET /cep/abc → 400**
+17. **E2E: rate limit → 429 + Retry-After** (`RATE_LIMIT_MAX=3`; `/health/live` não é rate-limited)
+18. **E2E: stale cache fallback** — TTL expira, providers caem, retorna 200 com `cached: true`
+19. **E2E: propaga `X-Correlation-Id` do request pro response**
+20. **CacheService: distingue fresh vs stale** — guard com `getRemainingTTL` evita drift do `allowStale`
+21. **CircuitBreakerFactory: cria breaker por provider, reutiliza, shutdown em `onModuleDestroy`**
 
 ## Ferramentas
 
@@ -55,6 +60,8 @@ test/
     mock-cep-data.ts
   unit/
     cep.service.spec.ts
+    cep-cache.service.spec.ts
+    circuit-breaker.factory.spec.ts
     provider-selector.service.spec.ts
     cep-param.pipe.spec.ts
     health.controller.spec.ts
@@ -62,11 +69,11 @@ test/
     viacep.provider.spec.ts       # jest.spyOn(globalThis, 'fetch')
     brasilapi.provider.spec.ts    # jest.spyOn(globalThis, 'fetch')
   e2e/
-    cep.e2e-spec.ts               # fetch mock + supertest
+    cep.e2e-spec.ts               # fetch mock + supertest (inclui rate limit + stale cache fallback)
   jest-e2e.json
 ```
 
-**Total atual:** 34 testes unit+integration + 9 e2e = **43 testes** verdes.
+**Total atual:** 40 unit + 10 integration + 15 e2e = **65 testes** verdes.
 
 ## CepService (o mais importante)
 
@@ -105,7 +112,7 @@ describe('CepService', () => {
     service = module.get(CepService);
   });
 
-  it('retorna sucesso no primeiro provider', async () => {
+  it('returns success from first provider', async () => {
     providerA.fetch.mockResolvedValue(mockCepData);
     const result = await service.lookup('01310100');
     expect(result.provider).toBe('A');
@@ -113,21 +120,21 @@ describe('CepService', () => {
     expect(cache.set).toHaveBeenCalled();
   });
 
-  it('faz fallback quando primeiro timeout', async () => {
+  it('falls back when first times out', async () => {
     providerA.fetch.mockRejectedValue(new ProviderTimeoutError('A'));
     providerB.fetch.mockResolvedValue(mockCepData);
     const result = await service.lookup('01310100');
     expect(result.provider).toBe('B');
   });
 
-  it('404 no primeiro NÃO tenta o segundo', async () => {
+  it('404 on first does NOT try second', async () => {
     providerA.fetch.mockRejectedValue(new CepNotFoundError('00000000'));
     await expect(service.lookup('00000000'))
       .rejects.toBeInstanceOf(CepNotFoundError);
     expect(providerB.fetch).not.toHaveBeenCalled();
   });
 
-  it('todos falham → AllProvidersUnavailableError com attempts', async () => {
+  it('all fail → AllProvidersUnavailableError with attempts', async () => {
     providerA.fetch.mockRejectedValue(new ProviderTimeoutError('A'));
     providerB.fetch.mockRejectedValue(new ProviderHttpError('B', 502));
 
@@ -141,24 +148,23 @@ describe('CepService', () => {
     });
   });
 
-  it('cache hit não chama provider', async () => {
+  it('cache hit does not call provider', async () => {
     cache.get.mockReturnValue({ data: mockCachedData, stale: false });
     const result = await service.lookup('01310100');
     expect(result.cached).toBe(true);
     expect(providerA.fetch).not.toHaveBeenCalled();
   });
 
-  it('todos falham mas tem stale → serve stale', async () => {
+  it('all fail but stale exists → serves stale', async () => {
     cache.get.mockReturnValue({ data: mockCachedData, stale: true });
     providerA.fetch.mockRejectedValue(new ProviderTimeoutError('A'));
     providerB.fetch.mockRejectedValue(new ProviderTimeoutError('B'));
 
     const result = await service.lookup('01310100');
     expect(result.cached).toBe(true);
-    expect(result.stale).toBe(true);
   });
 
-  it('pula provider com circuito aberto', async () => {
+  it('skips provider with open circuit', async () => {
     breakerFactory.get.mockImplementation((p) => ({
       opened: p.name === 'A',
       fire: (cep, sig) => p.fetch(cep, sig),
@@ -177,7 +183,7 @@ describe('CepService', () => {
 
 ```ts
 describe('ProviderSelectorService', () => {
-  it('rotaciona a ordem a cada chamada', () => {
+  it('rotates order on each call', () => {
     const p1 = { name: 'A' } as CepProvider;
     const p2 = { name: 'B' } as CepProvider;
     const selector = new ProviderSelectorService([p1, p2]);
@@ -208,7 +214,7 @@ function jsonResponse(status: number, body: unknown): Response {
 describe('ViaCepProvider', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it('parseia resposta com sucesso e normaliza campos', async () => {
+  it('parses success response and normalizes fields', async () => {
     mockFetch(async () =>
       jsonResponse(200, {
         cep: '01310-100',
@@ -238,7 +244,7 @@ describe('ViaCepProvider', () => {
     ).rejects.toBeInstanceOf(CepNotFoundError);
   });
 
-  it('contrato diferente → ProviderContractError', async () => {
+  it('unexpected contract → ProviderContractError', async () => {
     mockFetch(async () => jsonResponse(200, { inesperado: 'payload' }));
     await expect(
       makeProvider().fetch('01310100', new AbortController().signal),
@@ -252,7 +258,7 @@ describe('ViaCepProvider', () => {
     ).rejects.toBeInstanceOf(ProviderHttpError);
   });
 
-  it('AbortSignal cancela → ProviderTimeoutError', async () => {
+  it('AbortSignal abort → ProviderTimeoutError', async () => {
     mockFetch(async (_url, init) => {
       const signal = (init as RequestInit).signal!;
       return new Promise<Response>((_r, reject) => {
@@ -307,13 +313,13 @@ describe('GET /cep/:cep (e2e)', () => {
     expect(res.headers['x-correlation-id']).toBeDefined();
   });
 
-  it('formato inválido → 400', async () => {
+  it('invalid format → 400', async () => {
     const res = await request(app.getHttpServer()).get('/cep/abc');
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('invalid_cep');
   });
 
-  it('normaliza hífen', async () => {
+  it('normalizes hyphen', async () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse(200, mockBrasilApiResponse),
     );
@@ -321,7 +327,7 @@ describe('GET /cep/:cep (e2e)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('todos caem → 503 com attempts', async () => {
+  it('all providers down → 503 with attempts', async () => {
     jest.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('', { status: 503 }),
     );
@@ -344,7 +350,7 @@ it('GET /health/live → 200', async () => {
   expect(res.body.status).toBe('ok');
 });
 
-it('GET /health/ready → 200 com circuitos fechados', async () => {
+it('GET /health/ready → 200 with closed circuits', async () => {
   const res = await request(app.getHttpServer()).get('/health/ready');
   expect(res.status).toBe(200);
   expect(res.body.status).toBe('ready');

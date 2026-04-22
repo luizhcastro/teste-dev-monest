@@ -28,7 +28,7 @@ Parar de bater em um provider que está falhando consistentemente. Benefícios:
 
 ```ts
 new CircuitBreaker(provider.fetch.bind(provider), {
-  timeout: 3000,
+  timeout: false,
   errorThresholdPercentage: 50,
   volumeThreshold: 10,
   resetTimeout: 30_000,
@@ -41,7 +41,7 @@ new CircuitBreaker(provider.fetch.bind(provider), {
 
 | Parâmetro | Valor padrão | Por quê |
 |---|---|---|
-| `timeout` | 3000ms | Combinado com usuário. APIs de CEP deveriam responder em <1s em operação normal |
+| `timeout` | `false` (desligado) | Timeout controlado via `AbortSignal.timeout(PROVIDER_TIMEOUT_MS)` no service — vira `ProviderTimeoutError` tipado. Deixar opossum disparar também gerava erro não-tipado ("Timed out after Xms") obrigando regex em `err.message` pra classificar |
 | `errorThresholdPercentage` | 50 | Metade das req falhando = degradado o suficiente pra parar |
 | `volumeThreshold` | 10 | **Crítico em baixo tráfego.** Sem isso, 1 falha em 2 req abre o circuito |
 | `resetTimeout` | 30000ms | Tempo antes de tentar HALF_OPEN. 30s cobre blips comuns |
@@ -90,7 +90,10 @@ export class CircuitBreakerFactory implements OnModuleInit, OnModuleDestroy {
     const breaker = new CircuitBreaker(
       (cep: string, signal: AbortSignal) => provider.fetch(cep, signal),
       {
-        timeout: this.config.get('PROVIDER_TIMEOUT_MS', { infer: true }),
+        // Timeout controlado no service via AbortSignal.timeout() → chega
+        // como ProviderTimeoutError (mapFetchError). Deixar opossum disparar
+        // também gerava erro não-tipado. Um caminho só → erro tipado.
+        timeout: false,
         errorThresholdPercentage: this.config.get('CIRCUIT_ERROR_THRESHOLD_PERCENTAGE', { infer: true }),
         volumeThreshold: this.config.get('CIRCUIT_VOLUME_THRESHOLD', { infer: true }),
         resetTimeout: this.config.get('CIRCUIT_RESET_TIMEOUT_MS', { infer: true }),
@@ -175,8 +178,10 @@ Possível? Sim. Solução: `breaker.opened` é lido uma vez por iteração do lo
 ### Dois circuitos abrem ao mesmo tempo
 `AllProvidersUnavailableError` com ambos attempts marcados `circuit_open`. Cache stale (se existir) pode salvar via `allowStale`. Ver [CACHE.md](./CACHE.md).
 
-### `breaker.fire` com timeout do opossum vs AbortSignal
-O opossum tem timeout próprio (`timeout: 3000`). Passamos `AbortSignal` **mesmo assim** pro provider cancelar a chamada HTTP quando o timeout dispara. Sem isso, o opossum rejeita a Promise mas a conexão fica aberta.
+### Timeout: fonte única via `AbortSignal`
+Opossum `timeout` fica **desligado** (`timeout: false`). Service cria `AbortSignal.timeout(PROVIDER_TIMEOUT_MS)` e passa ao `breaker.fire(cep, signal)`. `fetch` nativo respeita o signal → dispara `AbortError` → `mapFetchError` converte em `ProviderTimeoutError` tipado.
+
+Por que não usar ambos: quando opossum dispara próprio timeout, rejeita com erro não-tipado `"Timed out after Xms"`, obrigando regex em `err.message` pra classificar. Fonte única → classificação limpa via `instanceof`.
 
 ## Testes
 Circuit breaker real é difícil de testar por causa de timing. Prefira:

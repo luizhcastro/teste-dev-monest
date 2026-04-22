@@ -100,11 +100,11 @@ Com `allowStale: true` no LRU, se ambos providers caírem E houver entrada stale
 ### Ambos circuitos abertos
 Não chamamos ninguém. 503 imediato. Isso **protege as APIs externas** enquanto se recuperam (evita thundering herd quando voltarem).
 
-### Timeout em dois níveis
-- **`AbortSignal.timeout(3000)`** passado pro `fetch` nativo → cancela a conexão TCP
-- **`timeout: 3000`** no opossum → rejeita a Promise do breaker
+### Timeout: fonte única via `AbortSignal`
+- **`AbortSignal.timeout(PROVIDER_TIMEOUT_MS)`** criado no service, passado ao `breaker.fire(cep, signal)` e repassado ao `fetch` nativo → cancela conexão TCP e vira `AbortError` → `ProviderTimeoutError`
+- **Opossum `timeout: false`** (desligado) — detalhes em [CIRCUIT-BREAKER.md](./CIRCUIT-BREAKER.md)
 
-Ambos apontam pro mesmo valor. Sem o `AbortSignal`, o opossum rejeitaria mas a chamada HTTP ficaria pendurada consumindo socket. Sem o timeout do opossum, erro no `AbortSignal` seria o único caminho.
+Por que fonte única: opossum com timeout ativo rejeita com erro não-tipado (`"Timed out after Xms"`) obrigando regex em mensagem pra classificar. `AbortSignal` → `ProviderTimeoutError` tipado → `instanceof` limpo.
 
 ### Round-robin em baixo tráfego
 Com 2 providers e baixo volume, round-robin estrito distribui ~50/50. Se um está com latência alta, o cliente vê latência intermitente. Isso é **intencional** — um provider lento deveria ter o circuito aberto, não ser "evitado silenciosamente".

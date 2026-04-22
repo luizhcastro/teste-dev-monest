@@ -150,17 +150,22 @@ export class ProviderSelectorService {
 Cada provider tem schema em `src/cep/schemas/`:
 
 ```ts
-// viacep.schema.ts
-export const viaCepSchema = z.union([
-  z.object({
-    cep: z.string(),
-    logradouro: z.string(),
-    bairro: z.string(),
-    localidade: z.string(),
-    uf: z.string().length(2),
-  }),
-  z.object({ erro: z.literal(true) }),
-]);
+// viacep.schema.ts — union entre sucesso e erro
+export const viaCepSuccessSchema = z.object({
+  cep: z.string(),
+  logradouro: z.string(),
+  bairro: z.string(),
+  localidade: z.string(),
+  uf: z.string().length(2),
+});
+
+// ViaCEP já retornou tanto `{erro: true}` quanto `{erro: "true"}` em momentos
+// diferentes. Aceitar ambos evita `ProviderContractError` espúrio.
+export const viaCepErrorSchema = z.object({
+  erro: z.union([z.literal(true), z.literal('true')]),
+});
+
+export const viaCepSchema = z.union([viaCepSuccessSchema, viaCepErrorSchema]);
 
 // brasilapi.schema.ts
 export const brasilApiSchema = z.object({

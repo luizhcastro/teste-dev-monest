@@ -11,6 +11,7 @@ API NestJS que expõe `GET /cep/:cep`. Consulta providers externos (ViaCEP, Bras
 | **`fetch` nativo (Node 20+)** | Built-in, zero dependência, `AbortSignal.timeout()` nativo, `Response` WHATWG-padrão. Axios seria peso extra sem ganho. |
 | `opossum` | Circuit breaker maduro, API simples, eventos pra telemetria. |
 | `@nestjs/throttler` | Rate limit in-memory com guard global. Zero infra. |
+| `@nestjs/swagger` | OpenAPI auto-gerado a partir de decorators. UI em `/docs`. |
 | `lru-cache` v11 | LRU in-process com TTL. Zero infra. |
 | `zod` | Validação de schema. Usado tanto em env quanto em resposta de providers. |
 | `nestjs-pino` + `pino` | Logger estruturado rápido, com pino-http já ligado no Nest. |
@@ -45,6 +46,8 @@ src/
       viacep.schema.ts            # Zod
       brasilapi.schema.ts
   common/
+    dto/
+      error-response.dto.ts       # Swagger schema p/ erros + attempts
     filters/
       cep-exception.filter.ts     # mapeia erros → HTTP (inclui 429)
     middleware/

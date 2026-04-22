@@ -44,9 +44,10 @@ NEW_RELIC_LICENSE_KEY=
 `src/config/env.validation.ts`:
 ```ts
 const envSchema = z.object({
-  PORT: z.coerce.number().default(3000),
+  PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  APP_VERSION: z.string().default('dev'),
 
   VIACEP_URL: z.string().url().default('https://viacep.com.br'),
   BRASILAPI_URL: z.string().url().default('https://brasilapi.com.br'),
@@ -63,11 +64,25 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
 
   OTEL_SERVICE_NAME: z.string().default('cep-api'),
-  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional()
+    .or(z.literal('').transform(() => undefined)),
   NEW_RELIC_LICENSE_KEY: z.string().optional(),
 });
 
-export const env = envSchema.parse(process.env);
+export type Env = z.infer<typeof envSchema>;
+
+// validateEnv agrega os issues do Zod e lança Error com mensagem formatada,
+// registrado em ConfigModule.forRoot({ validate: validateEnv }).
+export function validateEnv(config: Record<string, unknown>): Env {
+  const result = envSchema.safeParse(config);
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
+    throw new Error(`Invalid environment variables:\n${issues}`);
+  }
+  return result.data;
+}
 ```
 
 Processo **não sobe** com env inválido — fail fast.
@@ -84,6 +99,16 @@ Teste:
 ```bash
 curl -s http://localhost:3000/cep/01310100 | jq
 ```
+
+### Swagger UI
+
+OpenAPI servido em `/docs` — útil pra explorar o contrato e disparar requests manuais:
+
+```
+http://localhost:3000/docs
+```
+
+URL é logada no boot (`Swagger UI: http://localhost:<PORT>/docs`). JSON cru em `/docs-json`.
 
 ## Docker
 

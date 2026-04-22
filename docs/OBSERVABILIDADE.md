@@ -151,13 +151,18 @@ async lookup(cep: string): Promise<CepResponse> {
 
 ```
 HTTP GET /cep/:cep                (auto, HttpInstrumentation)
-└── cep.lookup                    (service)
-    ├── cep.cache.get
-    ├── cep.provider.brasilapi    (se chamou)
-    │   └── HTTP GET viacep...    (auto)
-    ├── cep.provider.viacep       (se fallback)
-    └── cep.cache.set
+└── cep.lookup                    (service, único span custom)
+    ├── HTTP GET brasilapi...     (auto, HttpInstrumentation)
+    └── HTTP GET viacep...        (auto, se fallback)
 ```
+
+`cep.lookup` é o único span criado manualmente. Chamadas a providers aparecem como spans HTTP automáticos (filhos herdam contexto do `cep.lookup` ativo). Atributos custom no `cep.lookup`:
+
+- `cep` — CEP consultado
+- `cep.cached` — `true` se veio de cache
+- `cep.stale` — `true` se cache stale serviu fallback
+- `cep.provider` — provider que atendeu
+- `cep.attempts` — quantidade de tentativas antes do sucesso
 
 ## Métricas
 
