@@ -13,10 +13,6 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   app.useGlobalFilters(new CepExceptionFilter());
-
-  // Propaga SIGTERM/SIGINT pros hooks do Nest (onModuleDestroy etc).
-  // Sem isso, em rolling deploy do k8s o breaker.shutdown() não roda
-  // e requests em voo podem ser perdidos.
   app.enableShutdownHooks();
 
   const config = app.get(ConfigService<Env, true>);

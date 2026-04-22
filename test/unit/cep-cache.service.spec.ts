@@ -4,18 +4,6 @@ import {
   CepCacheService,
 } from '../../src/cep/cache/cep-cache.service';
 import { mockCachedData } from '../fixtures/mock-cep-data';
-
-/**
- * Testes do cache com foco no bug histórico do stale:
- * lru-cache v11 com `allowStale: true` retorna stale no .get() padrão
- * E consome a entrada. Sem o guard via getRemainingTTL, o ramo stale
- * nunca disparava.
- *
- * Nota sobre timing: `lru-cache` v11 usa `perf_hooks.performance.now()` que
- * os fake timers do Jest não interceptam por padrão. Usamos TTLs curtos +
- * `await sleep()` com timers reais. Os testes ficam em ~300ms total —
- * aceitável.
- */
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -50,8 +38,6 @@ describe('CepCacheService', () => {
   });
 
   it('após TTL, primeira leitura retorna stale (e não fresh)', async () => {
-    // cenário do bug §3.1: sem o guard via getRemainingTTL, a primeira
-    // .get() retornava stale marcado como fresh
     const cache = makeService({ ttl: 40 });
     cache.set('01310100', cached);
 
@@ -61,9 +47,6 @@ describe('CepCacheService', () => {
   });
 
   it('segunda leitura após TTL retorna undefined (entrada foi consumida)', async () => {
-    // comportamento documentado do lru-cache: .get() em entrada stale
-    // com allowStale:true consome a entrada. Validamos explicitamente
-    // pra que um upgrade da lib que quebre isso seja detectado aqui.
     const cache = makeService({ ttl: 40 });
     cache.set('01310100', cached);
 
@@ -81,7 +64,7 @@ describe('CepCacheService', () => {
     cache.set('01310100', cached);
     await sleep(30);
     cache.set('01310100', cached);
-    await sleep(30); // total 60ms, mas o segundo set reiniciou o TTL
+    await sleep(30);
 
     expect(cache.get('01310100')).toEqual({ data: cached, stale: false });
   });

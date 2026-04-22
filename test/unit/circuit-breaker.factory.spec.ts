@@ -6,16 +6,6 @@ import {
 import type { CepProvider } from '../../src/cep/providers/cep-provider.interface';
 import { CircuitBreakerFactory } from '../../src/cep/providers/circuit-breaker.factory';
 
-/**
- * Testes de integração fina do CircuitBreakerFactory com opossum real.
- *
- * Foco nas duas decisões sutis do arquivo:
- *  1. `errorFilter` — CepNotFoundError NÃO conta como falha (404 não abre circuito)
- *  2. Ciclo de estados closed → open → half-open com volumeThreshold/resetTimeout
- *
- * Configs: volumeThreshold=2, resetTimeout=50ms, threshold=50%.
- * Pequeno o suficiente pro teste ser rápido, grande o suficiente pra ser realista.
- */
 function makeFactory(overrides: Partial<Record<string, number>> = {}): CircuitBreakerFactory {
   const values: Record<string, number> = {
     PROVIDER_TIMEOUT_MS: 1000,
@@ -90,9 +80,6 @@ describe('CircuitBreakerFactory', () => {
     });
 
     it('404s contam como sucesso no opossum — só falhas reais movem o ratio', async () => {
-      // opossum trata errorFilter-filtrados como "não-falha" (conta como
-      // sucesso). Importa pra entender: misturar 404s COM falhas reais
-      // pode manter o ratio abaixo do threshold.
       factory = makeFactory({ CIRCUIT_VOLUME_THRESHOLD: 2 });
       let call = 0;
       const provider = makeProvider('viacep', async () => {
@@ -102,7 +89,6 @@ describe('CircuitBreakerFactory', () => {
       });
       const breaker = factory.get(provider);
 
-      // 3 x 404 (errorFilter ignora, contam como sucesso pro ratio)
       for (let i = 0; i < 3; i++) {
         await expect(
           breaker.fire('x', new AbortController().signal),
@@ -110,7 +96,6 @@ describe('CircuitBreakerFactory', () => {
       }
       expect(breaker.opened).toBe(false);
 
-      // 4 x 500 reais: ratio passa de 4/7 (~57%) > threshold 50%
       for (let i = 0; i < 4; i++) {
         await expect(
           breaker.fire('x', new AbortController().signal),
@@ -130,7 +115,6 @@ describe('CircuitBreakerFactory', () => {
 
       expect(breaker.opened).toBe(false);
 
-      // duas falhas (volumeThreshold=2, threshold=50%)
       for (let i = 0; i < 2; i++) {
         await expect(
           breaker.fire('01310100', new AbortController().signal),
@@ -155,7 +139,6 @@ describe('CircuitBreakerFactory', () => {
       });
       const breaker = factory.get(provider);
 
-      // abre o circuito
       for (let i = 0; i < 2; i++) {
         await expect(
           breaker.fire('01310100', new AbortController().signal),
@@ -163,11 +146,8 @@ describe('CircuitBreakerFactory', () => {
       }
       expect(breaker.opened).toBe(true);
 
-      // espera o resetTimeout
       await sleep(80);
 
-      // depois do resetTimeout, a próxima chamada é a "probe" half-open.
-      // Se provider responder OK, circuito volta a CLOSED.
       shouldFail = false;
       const data = await breaker.fire(
         '01310100',

@@ -1,12 +1,4 @@
 import { ApiProperty } from '@nestjs/swagger';
-
-/**
- * Contrato de resposta do endpoint de CEP.
- *
- * Mantido como `class` (não `interface`) porque o `@nestjs/swagger` precisa
- * de metadata em runtime pra gerar o OpenAPI. Uso interno (services, cache)
- * ainda trata como objeto plain — nenhuma lógica fica aqui.
- */
 export class CepResponseDto {
   @ApiProperty({
     example: '01310100',

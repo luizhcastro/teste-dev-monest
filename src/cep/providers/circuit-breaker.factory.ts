@@ -39,11 +39,6 @@ export class CircuitBreakerFactory implements OnModuleInit, OnModuleDestroy {
     const breaker: CepBreaker = new CircuitBreaker(
       (cep: string, signal: AbortSignal) => provider.fetch(cep, signal),
       {
-        // Timeout é controlado no service via AbortSignal.timeout() e chega
-        // no provider como ProviderTimeoutError (mapFetchError).
-        // Deixar o opossum também disparar timeout gerava erro não-tipado
-        // ("Timed out after Xms") que obrigava regex em err.message pra
-        // classificar. Um caminho só → erro tipado → classificação limpa.
         timeout: false,
         errorThresholdPercentage: this.config.get(
           'CIRCUIT_ERROR_THRESHOLD_PERCENTAGE',

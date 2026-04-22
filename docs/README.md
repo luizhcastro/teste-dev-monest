@@ -16,7 +16,7 @@ Swagger: https://teste-dev-monest-production.up.railway.app/docs
 | [CIRCUIT-BREAKER.md](./CIRCUIT-BREAKER.md) | Mexer em resiliência / tuning do opossum |
 | [RATE-LIMIT.md](./RATE-LIMIT.md) | Config de rate limit, tuning, storage per-instance |
 | [CACHE.md](./CACHE.md) | Entender estratégia de cache e tradeoffs |
-| [OBSERVABILIDADE.md](./OBSERVABILIDADE.md) | Instrumentação, métricas, logs, integração New Relic |
+| [OBSERVABILIDADE.md](./OBSERVABILIDADE.md) | Instrumentação, métricas, logs, integração New Relic e evidência em produção |
 | [TESTES.md](./TESTES.md) | Estratégia e cenários críticos |
 | [SETUP.md](./SETUP.md) | Rodar local, Docker, variáveis de ambiente |
 

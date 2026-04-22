@@ -261,12 +261,6 @@ describe('CEP API — rate limit (e2e)', () => {
   });
 });
 
-/**
- * Cenário crítico do bug §3.1 do feedback:
- *   TTL expira → todos os providers 5xx → API deve servir stale do cache.
- *
- * Sobe uma app separada com CACHE_TTL_MS=50 pra simular expiração rápida.
- */
 describe('CEP API — stale cache fallback (e2e)', () => {
   let app: INestApplication;
   const originalTtl = process.env.CACHE_TTL_MS;
@@ -294,7 +288,6 @@ describe('CEP API — stale cache fallback (e2e)', () => {
   });
 
   it('popula cache, TTL expira, providers caem → 200 com cached=true (stale)', async () => {
-    // 1) primeira request popula o cache
     mockFetchImpl(async (url) => {
       const u = String(url);
       if (u.includes('viacep')) {
@@ -315,15 +308,12 @@ describe('CEP API — stale cache fallback (e2e)', () => {
 
     jest.restoreAllMocks();
 
-    // 2) espera TTL expirar
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // 3) providers agora falham
     mockFetchImpl(async () => new Response('', { status: 503 }));
 
     const staleRes = await request(app.getHttpServer()).get('/cep/04567890');
 
-    // serviu stale (não 503)
     expect(staleRes.status).toBe(200);
     expect(staleRes.body).toMatchObject({
       cep: '04567890',

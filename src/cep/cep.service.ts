@@ -154,14 +154,6 @@ export class CepService {
     providerDuration.record(latencyMs / 1000, { provider, outcome });
   }
 
-  /**
-   * Classifica o erro para o campo `reason` do attempt.
-   *
-   * Só `ProviderError` tem `reason` estruturada. Qualquer outro erro aqui
-   * é inesperado — circuito aberto é interceptado pelo pre-check de
-   * `breaker.opened` antes do `fire`, e o timeout do opossum foi desligado
-   * (fonte única = `AbortSignal` → `ProviderTimeoutError`).
-   */
   private reasonOf(err: unknown): string {
     if (err instanceof ProviderError) {
       return err.reason;
