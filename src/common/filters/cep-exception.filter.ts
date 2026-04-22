@@ -9,6 +9,7 @@ import type { Request, Response } from 'express';
 import {
   AllProvidersUnavailableError,
   CepApiError,
+  RateLimitExceededError,
 } from '../../cep/errors/cep.errors';
 
 interface RequestWithCorrelation extends Request {
@@ -35,6 +36,10 @@ export class CepExceptionFilter implements ExceptionFilter {
       if (exception instanceof AllProvidersUnavailableError) {
         body.attempts = exception.attempts;
         res.setHeader('Retry-After', '30');
+      }
+
+      if (exception instanceof RateLimitExceededError) {
+        res.setHeader('Retry-After', String(exception.retryAfterSeconds));
       }
 
       res.status(exception.status).json(body);

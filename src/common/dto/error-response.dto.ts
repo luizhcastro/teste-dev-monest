@@ -28,6 +28,7 @@ export class ErrorResponseDto {
       'invalid_cep',
       'cep_not_found',
       'all_providers_unavailable',
+      'rate_limit_exceeded',
       'internal_error',
     ],
   })

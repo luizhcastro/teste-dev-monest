@@ -8,6 +8,7 @@ import {
   ApiParam,
   ApiServiceUnavailableResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
 import { ErrorResponseDto } from '../common/dto/error-response.dto';
 import { CepService } from './cep.service';
@@ -49,6 +50,11 @@ export class CepController {
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
     description: 'CEP válido mas inexistente nas bases dos providers.',
+  })
+  @ApiTooManyRequestsResponse({
+    type: ErrorResponseDto,
+    description:
+      'Rate limit excedido para o IP de origem. Header `Retry-After` em segundos.',
   })
   @ApiServiceUnavailableResponse({
     type: ErrorResponseDto,

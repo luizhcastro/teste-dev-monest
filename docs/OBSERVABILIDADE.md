@@ -173,6 +173,7 @@ export const circuitStateGauge = meter.createObservableGauge('cep_circuit_state'
 export const cacheHitsTotal = meter.createCounter('cep_cache_hits_total');
 export const cacheMissesTotal = meter.createCounter('cep_cache_misses_total');
 export const cacheStaleHitsTotal = meter.createCounter('cep_cache_stale_hits_total');
+export const rateLimitExceededTotal = meter.createCounter('cep_rate_limit_exceeded_total');
 ```
 
 ### Tabela
@@ -187,6 +188,7 @@ export const cacheStaleHitsTotal = meter.createCounter('cep_cache_stale_hits_tot
 | `cep_cache_hits_total` | counter | — |
 | `cep_cache_misses_total` | counter | — |
 | `cep_cache_stale_hits_total` | counter | — |
+| `cep_rate_limit_exceeded_total` | counter | — (requests bloqueadas por rate limit) |
 
 ### Observable gauge — padrão pull
 
@@ -308,3 +310,4 @@ FROM Log SELECT count(*) FACET cep SINCE 1 day ago LIMIT 20
 | Hit rate baixo | `cache_hits / total < 0.5` por 10 minutos (warm-up aceitável) |
 | p95 latência alta | `percentile(cep_lookup_duration_seconds, 95) > 2s` |
 | Taxa de 503 | `cep_lookup_total{status='all_failed'}` > 0 |
+| Rate limit pico | `rate(count(cep_rate_limit_exceeded_total), 1m) > N` por 5 minutos (bot ou limite mal dimensionado) |

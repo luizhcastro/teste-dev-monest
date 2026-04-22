@@ -13,6 +13,12 @@ GET /cep/:cep
     │
     ▼
 ┌────────────────────────────┐
+│ ThrottlerGuard             │  chave = req.ip (ou socket.remoteAddress)
+│ (CustomThrottlerGuard)     │  skip em /health/* via @SkipThrottle
+└────────────────────────────┘  > limit → RateLimitExceededError → [429 + Retry-After]
+    │
+    ▼
+┌────────────────────────────┐
 │ CepParamPipe               │  normalizeCep() → só dígitos
 │                            │  regex /^\d{8}$/ valida
 └────────────────────────────┘  falha → BadRequestException → [400]
@@ -69,6 +75,9 @@ CEP inexistente é resposta de negócio legítima. Um provider diz "não existe"
 
 ### 400 é antes de qualquer provider
 Validação de formato acontece no `CepParamPipe` antes do controller. Zero chamada externa se o input é inválido.
+
+### 429 é antes do pipe (intencional)
+Rate limit roda no guard, que executa **antes** do pipe de validação. Um cliente abusivo mandando `/cep/abc` também consome quota — não queremos gastar CPU validando um input que nem deveria ter chegado. Detalhes e tuning em [RATE-LIMIT.md](./RATE-LIMIT.md).
 
 ### 503 inclui tentativas detalhadas
 ```json

@@ -25,6 +25,9 @@ const envSchema = z.object({
   CACHE_MAX_ENTRIES: z.coerce.number().int().positive().default(10_000),
   CACHE_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
 
+  RATE_LIMIT_TTL_MS: z.coerce.number().int().positive().default(60_000),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
+
   OTEL_SERVICE_NAME: z.string().default('cep-api'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z
     .string()

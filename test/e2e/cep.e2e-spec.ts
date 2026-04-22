@@ -169,6 +169,73 @@ describe('CEP API (e2e)', () => {
   });
 });
 
+describe('CEP API — rate limit (e2e)', () => {
+  let app: INestApplication;
+  const originalTtl = process.env.RATE_LIMIT_TTL_MS;
+  const originalMax = process.env.RATE_LIMIT_MAX;
+
+  beforeAll(async () => {
+    process.env.RATE_LIMIT_TTL_MS = '60000';
+    process.env.RATE_LIMIT_MAX = '3';
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleRef.createNestApplication({ logger: false });
+    app.useGlobalFilters(new CepExceptionFilter());
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    if (originalTtl === undefined) delete process.env.RATE_LIMIT_TTL_MS;
+    else process.env.RATE_LIMIT_TTL_MS = originalTtl;
+    if (originalMax === undefined) delete process.env.RATE_LIMIT_MAX;
+    else process.env.RATE_LIMIT_MAX = originalMax;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('bloqueia requests acima do limite com 429 + Retry-After', async () => {
+    mockFetchImpl(async () =>
+      jsonResponse(200, {
+        cep: '01310-100',
+        logradouro: 'Avenida Paulista',
+        bairro: 'Bela Vista',
+        localidade: 'São Paulo',
+        uf: 'SP',
+      }),
+    );
+
+    const server = app.getHttpServer();
+
+    for (let i = 0; i < 3; i++) {
+      const ok = await request(server).get('/cep/01310100');
+      expect(ok.status).toBe(200);
+    }
+
+    const blocked = await request(server).get('/cep/01310100');
+    expect(blocked.status).toBe(429);
+    expect(blocked.body).toMatchObject({
+      error: 'rate_limit_exceeded',
+    });
+    expect(blocked.body.correlationId).toBeDefined();
+    expect(blocked.headers['retry-after']).toBeDefined();
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+  });
+
+  it('não aplica limit em /health/*', async () => {
+    const server = app.getHttpServer();
+    for (let i = 0; i < 10; i++) {
+      const res = await request(server).get('/health/live');
+      expect(res.status).toBe(200);
+    }
+  });
+});
+
 /**
  * Cenário crítico do bug §3.1 do feedback:
  *   TTL expira → todos os providers 5xx → API deve servir stale do cache.

@@ -1,7 +1,7 @@
 # Arquitetura
 
 ## Visão geral
-API NestJS que expõe `GET /cep/:cep`. Consulta providers externos (ViaCEP, BrasilAPI) com **round-robin**, **fallback automático**, **circuit breaker por provider**, **cache em memória** e **observabilidade via OpenTelemetry → New Relic**.
+API NestJS que expõe `GET /cep/:cep`. Consulta providers externos (ViaCEP, BrasilAPI) com **round-robin**, **fallback automático**, **circuit breaker por provider**, **cache em memória**, **rate limit por IP** e **observabilidade via OpenTelemetry → New Relic**.
 
 ## Stack
 
@@ -10,6 +10,7 @@ API NestJS que expõe `GET /cep/:cep`. Consulta providers externos (ViaCEP, Bras
 | `@nestjs/*` | Requisito do desafio. DI ajuda a plugar providers. |
 | **`fetch` nativo (Node 20+)** | Built-in, zero dependência, `AbortSignal.timeout()` nativo, `Response` WHATWG-padrão. Axios seria peso extra sem ganho. |
 | `opossum` | Circuit breaker maduro, API simples, eventos pra telemetria. |
+| `@nestjs/throttler` | Rate limit in-memory com guard global. Zero infra. |
 | `lru-cache` v11 | LRU in-process com TTL. Zero infra. |
 | `zod` | Validação de schema. Usado tanto em env quanto em resposta de providers. |
 | `nestjs-pino` + `pino` | Logger estruturado rápido, com pino-http já ligado no Nest. |
@@ -45,14 +46,17 @@ src/
       brasilapi.schema.ts
   common/
     filters/
-      cep-exception.filter.ts     # mapeia erros → HTTP
+      cep-exception.filter.ts     # mapeia erros → HTTP (inclui 429)
     middleware/
       correlation-id.middleware.ts
+    throttler/
+      throttler.module.ts         # @nestjs/throttler + APP_GUARD global
+      custom-throttler.guard.ts   # converte bloqueio em RateLimitExceededError
     logging/
       logger.module.ts            # nestjs-pino + mixin com traceId/spanId
     telemetry/
       otel-setup.ts
-      tracer.ts                   # tracer + 8 métricas
+      tracer.ts                   # tracer + 9 métricas (inclui rate_limit)
   config/
     config.module.ts
     env.validation.ts             # Zod no process.env
@@ -74,18 +78,20 @@ Makefile                          # conveniência: make dev, make docker, make t
 
 ## Módulos
 
-- **AppModule** — bootstrap, ConfigModule, CepModule, HealthModule, middleware de correlation-id aplicado globalmente
+- **AppModule** — bootstrap, ConfigModule, ThrottlerModule, CepModule, HealthModule, middleware de correlation-id aplicado globalmente
 - **CepModule** — controller + service + providers (multi-provider DI) + cache + circuit breaker factory
 - **ConfigModule** — valida `process.env` com zod; falha fast se inválido
-- **HealthModule** — liveness + readiness probes
+- **ThrottlerModule** — registra `@nestjs/throttler` + `CustomThrottlerGuard` via `APP_GUARD`
+- **HealthModule** — liveness + readiness probes (rotas `/health/*` com `@SkipThrottle`)
 
 ## Fluxo de alto nível
 
 ```
 Request
   └─> correlation-id middleware
-        └─> CepController (valida param)
-              └─> CepService
+        └─> ThrottlerGuard (rate limit por IP; skip em /health/*)
+              └─> CepController (valida param)
+                    └─> CepService
                     ├─> CacheService.get → hit? retorna
                     └─> ProviderSelector.getOrder()
                           └─> for provider in order:

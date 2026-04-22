@@ -9,6 +9,7 @@ Contexto do projeto — útil tanto pra humanos lendo o código quanto pra agent
 | [PROVIDERS.md](./PROVIDERS.md) | Mexer nos providers, adicionar um novo, entender round-robin |
 | [ERRORS.md](./ERRORS.md) | Entender a taxonomia de erros e o exception filter |
 | [CIRCUIT-BREAKER.md](./CIRCUIT-BREAKER.md) | Mexer em resiliência / tuning do opossum |
+| [RATE-LIMIT.md](./RATE-LIMIT.md) | Config de rate limit, tuning, storage per-instance |
 | [CACHE.md](./CACHE.md) | Entender estratégia de cache e tradeoffs |
 | [OBSERVABILIDADE.md](./OBSERVABILIDADE.md) | Instrumentação, métricas, logs, integração New Relic |
 | [TESTES.md](./TESTES.md) | Estratégia e cenários críticos |

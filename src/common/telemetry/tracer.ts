@@ -52,3 +52,10 @@ export const cacheStaleHitsTotal = meter.createCounter(
     description: 'Cache hits que foram stale (usados no fallback 503)',
   },
 );
+
+export const rateLimitExceededTotal = meter.createCounter(
+  'cep_rate_limit_exceeded_total',
+  {
+    description: 'Requests bloqueadas por rate limit (HTTP 429)',
+  },
+);

@@ -9,6 +9,7 @@ Cada tipo de falha é uma **classe**. Fluxo decide em `instanceof`, não em stri
 CepApiError (abstract)                          [vai pro cliente]
 ├── InvalidCepError                  [400]
 ├── CepNotFoundError                 [404]
+├── RateLimitExceededError           [429]
 └── AllProvidersUnavailableError     [503]
 
 ProviderError (abstract)                        [interno, nunca vaza]
@@ -26,6 +27,7 @@ ProviderError (abstract)                        [interno, nunca vaza]
 |---|---|---|---|---|
 | `InvalidCepError` | DTO (regex falha) | — | — | 400 |
 | `CepNotFoundError` | Provider retorna 404 ou `{erro:true}` | **NÃO** | **NÃO** | 404 |
+| `RateLimitExceededError` | ThrottlerGuard bloqueou | **NÃO** | — | 429 |
 | `ProviderTimeoutError` | AbortSignal disparou | SIM | SIM | (próximo) |
 | `ProviderHttpError` | Provider 5xx | SIM | SIM | (próximo) |
 | `ProviderNetworkError` | ECONNREFUSED, DNS, reset | SIM | SIM | (próximo) |
@@ -69,6 +71,14 @@ export class AllProvidersUnavailableError extends CepApiError {
   readonly code = 'all_providers_unavailable';
   constructor(readonly attempts: ProviderAttempt[]) {
     super('All providers are unavailable');
+  }
+}
+
+export class RateLimitExceededError extends CepApiError {
+  readonly status = 429;
+  readonly code = 'rate_limit_exceeded';
+  constructor(readonly retryAfterSeconds: number) {
+    super('Rate limit exceeded');
   }
 }
 
@@ -186,6 +196,16 @@ app.useGlobalFilters(new CepExceptionFilter());
   "correlationId": "uuid-v4"
 }
 ```
+
+### 429 Too Many Requests
+```json
+{
+  "error": "rate_limit_exceeded",
+  "message": "Rate limit exceeded",
+  "correlationId": "uuid-v4"
+}
+```
++ header `Retry-After: <segundos>`. Detalhes em [RATE-LIMIT.md](./RATE-LIMIT.md).
 
 ### 503 Service Unavailable
 ```json

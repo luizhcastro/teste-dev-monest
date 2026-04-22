@@ -39,6 +39,16 @@ export class AllProvidersUnavailableError extends CepApiError {
   }
 }
 
+export class RateLimitExceededError extends CepApiError {
+  readonly status = 429;
+  readonly code = 'rate_limit_exceeded';
+
+  constructor(readonly retryAfterSeconds: number) {
+    super('Rate limit exceeded');
+    this.name = 'RateLimitExceededError';
+  }
+}
+
 export abstract class ProviderError extends Error {
   abstract readonly reason: string;
 

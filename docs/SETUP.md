@@ -29,6 +29,10 @@ CIRCUIT_RESET_TIMEOUT_MS=30000
 CACHE_MAX_ENTRIES=10000
 CACHE_TTL_MS=86400000
 
+# Rate limit (per IP, in-memory por instância)
+RATE_LIMIT_TTL_MS=60000
+RATE_LIMIT_MAX=60
+
 # Observabilidade (opcional em dev)
 OTEL_SERVICE_NAME=cep-api
 OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.nr-data.net:4318
@@ -54,6 +58,9 @@ const envSchema = z.object({
 
   CACHE_MAX_ENTRIES: z.coerce.number().int().positive().default(10_000),
   CACHE_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
+
+  RATE_LIMIT_TTL_MS: z.coerce.number().int().positive().default(60_000),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
 
   OTEL_SERVICE_NAME: z.string().default('cep-api'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
@@ -265,6 +272,9 @@ curl -s http://localhost:3000/health/ready | jq
 
 # Forçar correlation id
 curl -sH 'X-Correlation-Id: my-id' http://localhost:3000/cep/01310100
+
+# Rate limit — com RATE_LIMIT_MAX=3 dispara 429 no 4º hit
+for i in 1 2 3 4; do curl -i -s http://localhost:3000/cep/01310100 | head -1; done
 ```
 
 ## Troubleshooting
