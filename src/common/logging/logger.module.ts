@@ -18,6 +18,23 @@ const CORRELATION_HEADER_RESPONSE = 'X-Correlation-Id';
         const level = config.get('LOG_LEVEL', { infer: true }) as string;
         const isDev =
           config.get('NODE_ENV', { infer: true }) === 'development';
+        const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+        const serviceName = process.env.OTEL_SERVICE_NAME ?? 'cep-api';
+        const serviceVersion = process.env.APP_VERSION ?? 'dev';
+
+        const prodTransport = otlpEndpoint
+          ? {
+              target: 'pino-opentelemetry-transport',
+              options: {
+                loggerName: serviceName,
+                serviceVersion,
+                resourceAttributes: {
+                  'service.name': serviceName,
+                  'service.version': serviceVersion,
+                },
+              },
+            }
+          : undefined;
 
         return {
           pinoHttp: {
@@ -31,7 +48,7 @@ const CORRELATION_HEADER_RESPONSE = 'X-Correlation-Id';
                     ignore: 'pid,hostname,req.headers,res.headers',
                   },
                 }
-              : undefined,
+              : prodTransport,
 
             genReqId: (req: IncomingMessage, res: ServerResponse) => {
               const incoming = req.headers[CORRELATION_HEADER_LOWER];
