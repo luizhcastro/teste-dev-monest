@@ -9,8 +9,8 @@ import {
   ApiOperation,
   ApiServiceUnavailableResponse,
   ApiTags,
-  getSchemaPath,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CircuitBreakerFactory } from '../cep/providers/circuit-breaker.factory';
 
 type CircuitState = 'closed' | 'half_open' | 'open';
@@ -26,6 +26,7 @@ interface ReadyResponse {
 }
 
 @ApiTags('health')
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(private readonly breakerFactory: CircuitBreakerFactory) {}
@@ -78,7 +79,19 @@ export class HealthController {
       type: 'object',
       properties: {
         status: { type: 'string', example: 'not_ready' },
-        circuits: { type: 'array', items: { $ref: getSchemaPath(Object) } },
+        circuits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              provider: { type: 'string', example: 'viacep' },
+              state: {
+                type: 'string',
+                enum: ['closed', 'half_open', 'open'],
+              },
+            },
+          },
+        },
       },
     },
   })
