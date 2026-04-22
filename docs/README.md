@@ -2,6 +2,11 @@
 
 Contexto do projeto — útil tanto pra humanos lendo o código quanto pra agents navegando.
 
+## Produção
+
+Deploy no Railway: **https://teste-dev-monest-production.up.railway.app**
+Swagger: https://teste-dev-monest-production.up.railway.app/docs
+
 | Arquivo | Quando ler |
 |---|---|
 | [ARQUITETURA.md](./ARQUITETURA.md) | Primeira leitura. Visão geral, stack, folder structure, decisões |

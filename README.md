@@ -1,5 +1,13 @@
 # Teste Técnico - Desenvolvedor
 
+## Produção
+
+API rodando em: **https://teste-dev-monest-production.up.railway.app**
+
+- Endpoint: `GET /cep/{cep}`
+- Swagger UI: https://teste-dev-monest-production.up.railway.app/docs
+- Health: https://teste-dev-monest-production.up.railway.app/health/live
+
 ## O problema
 
 Você precisa criar uma API que consulta CEP. Simples, certo?
